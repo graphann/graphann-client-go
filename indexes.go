@@ -95,3 +95,29 @@ func (c *Client) ClearIndex(ctx context.Context, tenantID, indexID string) (*Cle
 	}
 	return &out, nil
 }
+
+// BuildIndex calls POST /v1/tenants/{tenantID}/indexes/{indexID}/build.
+//
+// The server kicks off the build asynchronously and returns immediately
+// with status="building". Callers should poll GetIndexStatus to observe
+// completion. This endpoint is marked deprecated server-side — modern
+// flows should rely on incremental ingestion + compaction instead.
+func (c *Client) BuildIndex(ctx context.Context, tenantID, indexID string) (*BuildIndexResponse, error) {
+	var out BuildIndexResponse
+	if err := c.do(ctx, "POST", indexBasePath(tenantID, indexID)+"/build", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CleanupOrphans calls POST /v1/admin/cleanup-orphans. Admin-only on the
+// server; sweeps stale compaction artifacts (*.old, *.compact, *.backup,
+// *.failed) from every tenant's data directory using a 1h minimum-age
+// guard so in-flight compactions are not disturbed.
+func (c *Client) CleanupOrphans(ctx context.Context) (*CleanupOrphansResponse, error) {
+	var out CleanupOrphansResponse
+	if err := c.do(ctx, "POST", "/v1/admin/cleanup-orphans", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

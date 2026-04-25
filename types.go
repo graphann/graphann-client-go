@@ -425,18 +425,31 @@ type LLMSettings struct {
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 }
 
-// UpdateLLMSettingsResponse is the body returned by PUT /v1/orgs/{org}/settings/llm.
+// UpdateLLMSettingsResponse is the body returned by PATCH /v1/orgs/{org}/llm-settings.
 type UpdateLLMSettingsResponse struct {
 	Message  string      `json:"message"`
 	OrgID    string      `json:"org_id"`
 	Settings LLMSettings `json:"settings"`
 }
 
-// DeleteLLMSettingsResponse is the body returned by DELETE /v1/orgs/{org}/settings/llm.
+// DeleteLLMSettingsResponse is the body returned by DELETE /v1/orgs/{org}/llm-settings.
 type DeleteLLMSettingsResponse struct {
 	Message  string      `json:"message"`
 	OrgID    string      `json:"org_id"`
 	Settings LLMSettings `json:"settings,omitempty"`
+}
+
+// BuildIndexResponse is the body returned by POST .../indexes/{iid}/build.
+type BuildIndexResponse struct {
+	IndexID string `json:"index_id"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// CleanupOrphansResponse is the body returned by POST /v1/admin/cleanup-orphans.
+type CleanupOrphansResponse struct {
+	Removed    []string `json:"removed"`
+	FreedBytes int64    `json:"freed_bytes"`
 }
 
 // MultiSearchRequest is the body for POST /v1/orgs/{org}/users/{user}/search.

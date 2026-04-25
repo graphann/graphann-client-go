@@ -559,7 +559,7 @@ func TestGetClusterHealth(t *testing.T) {
 
 func TestUpdateLLMSettings_UnwrapsEnvelope(t *testing.T) {
 	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
-		"PUT /v1/orgs/o/settings/llm": func(w http.ResponseWriter, r *http.Request) {
+		"PATCH /v1/orgs/o/llm-settings": func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(t, w, 200, UpdateLLMSettingsResponse{
 				Message: "ok",
 				OrgID:   "o",
@@ -576,6 +576,92 @@ func TestUpdateLLMSettings_UnwrapsEnvelope(t *testing.T) {
 		t.Fatalf("UpdateLLMSettings: %v", err)
 	}
 	if got.Provider != "openai" || got.Model != "gpt-4o-mini" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestGetLLMSettings_HitsCanonicalPath(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"GET /v1/orgs/o/llm-settings": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 200, LLMSettings{Provider: "openai", Model: "gpt-4o-mini"})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	got, err := c.GetLLMSettings(context.Background(), "o")
+	if err != nil {
+		t.Fatalf("GetLLMSettings: %v", err)
+	}
+	if got.Provider != "openai" || got.Model != "gpt-4o-mini" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestDeleteLLMSettings_HitsCanonicalPath(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"DELETE /v1/orgs/o/llm-settings": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 200, DeleteLLMSettingsResponse{
+				Message: "reset",
+				OrgID:   "o",
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	got, err := c.DeleteLLMSettings(context.Background(), "o")
+	if err != nil {
+		t.Fatalf("DeleteLLMSettings: %v", err)
+	}
+	if got.OrgID != "o" || got.Message != "reset" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// =============================================================================
+// BuildIndex (deprecated server endpoint, still on the v1 surface)
+// =============================================================================
+
+func TestBuildIndex_ReturnsBuildingStatus(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/build": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 200, BuildIndexResponse{
+				IndexID: "i",
+				Status:  "building",
+				Message: "Index build started",
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	got, err := c.BuildIndex(context.Background(), "t", "i")
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+	if got.IndexID != "i" || got.Status != "building" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// =============================================================================
+// CleanupOrphans (admin-only)
+// =============================================================================
+
+func TestCleanupOrphans_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/admin/cleanup-orphans": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 200, CleanupOrphansResponse{
+				Removed:    []string{"/data/tenants/t/indexes/i/seg.old"},
+				FreedBytes: 4096,
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	got, err := c.CleanupOrphans(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupOrphans: %v", err)
+	}
+	if got.FreedBytes != 4096 || len(got.Removed) != 1 {
 		t.Errorf("got %+v", got)
 	}
 }
