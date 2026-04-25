@@ -1,0 +1,8 @@
+# Go test binaries / coverage
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Build cache the user might invoke locally
+bin/
