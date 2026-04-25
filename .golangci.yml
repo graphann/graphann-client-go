@@ -1,0 +1,30 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  settings:
+    govet:
+      enable:
+        - shadow
+      disable:
+        # User project rule: struct fields are grouped by purpose, not
+        # by alignment. The fieldalignment vet check fights that style.
+        - fieldalignment
+    gosec:
+      excludes:
+        - G304
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - dupl
+      - path: examples/.*
+        linters:
+          - gocyclo
+          - errcheck
+          - revive
