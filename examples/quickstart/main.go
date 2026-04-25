@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	graphann "github.com/graphann/graphann-go"
+	graphann "github.com/graphann/graphann-client-go"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-module github.com/graphann/graphann-go
+module github.com/graphann/graphann-client-go
 
 go 1.21
 
