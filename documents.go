@@ -26,8 +26,8 @@ func (c *Client) ImportDocuments(ctx context.Context, tenantID, indexID string, 
 	return &out, nil
 }
 
-// GetPending calls GET /v1/tenants/{tid}/indexes/{iid}/pending.
-func (c *Client) GetPending(ctx context.Context, tenantID, indexID string) (*PendingStatusResponse, error) {
+// GetPendingStatus calls GET /v1/tenants/{tid}/indexes/{iid}/pending.
+func (c *Client) GetPendingStatus(ctx context.Context, tenantID, indexID string) (*PendingStatusResponse, error) {
 	var out PendingStatusResponse
 	if err := c.do(ctx, "GET", indexBasePath(tenantID, indexID)+"/pending", nil, &out, nil); err != nil {
 		return nil, err

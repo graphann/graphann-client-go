@@ -73,7 +73,7 @@ func (c *Client) ClearIndex    (ctx context.Context, tenantID, indexID string)  
 // Documents
 func (c *Client) AddDocuments         (ctx context.Context, tenantID, indexID string, req AddDocumentsRequest)         (*AddDocumentsResponse, error)
 func (c *Client) ImportDocuments      (ctx context.Context, tenantID, indexID string, req ImportDocumentsRequest)      (*ImportDocumentsResponse, error)
-func (c *Client) GetPending           (ctx context.Context, tenantID, indexID string)                                  (*PendingStatusResponse, error)
+func (c *Client) GetPendingStatus     (ctx context.Context, tenantID, indexID string)                                  (*PendingStatusResponse, error)
 func (c *Client) ProcessPending       (ctx context.Context, tenantID, indexID string)                                  (*ProcessPendingResponse, error)
 func (c *Client) ClearPending         (ctx context.Context, tenantID, indexID string)                                  (*ClearPendingResponse, error)
 func (c *Client) GetDocument          (ctx context.Context, tenantID, indexID string, docID int)                       (*DocumentResponse, error)

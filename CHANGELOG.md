@@ -4,6 +4,17 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-25
+
+### Changed (BREAKING)
+
+- Renamed `Client.GetPending` to `Client.GetPendingStatus` for naming
+  parity with the Python (`get_pending_status`) and TypeScript
+  (`getPendingStatus`) SDKs. Same signature, same return type, same
+  behavior — only the symbol name changed.
+
+  Migration: `s/GetPending/GetPendingStatus/` at every call site.
+
 ## [0.1.1] - 2026-04-25
 
 ### Added
