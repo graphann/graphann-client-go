@@ -4,7 +4,7 @@ Official Go client SDK for the [GraphANN](https://graphann.com) vector
 database.
 
 - Module: `github.com/graphann/graphann-client-go`
-- Status: `v0.1.0` — bootstrapping
+- Latest: `v0.4.0`
 - License: see [`./LICENSE`](./LICENSE)
 
 The SDK speaks the v1 HTTP API and exposes idiomatic Go types for
@@ -13,8 +13,11 @@ tenant, index, document, search, job, cluster, and settings operations.
 ## Install
 
 ```bash
-go get github.com/graphann/graphann-client-go@v0.1.0
+go get github.com/graphann/graphann-client-go@v0.4.0
 ```
+
+`proxy.golang.org` mirrors the module — no auth or env tweaks
+required, the toolchain resolves it like any other public module.
 
 ## 5-line quickstart
 
