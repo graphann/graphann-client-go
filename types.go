@@ -477,6 +477,14 @@ type CleanupOrphansResponse struct {
 	FreedBytes int64    `json:"freed_bytes"`
 }
 
+// GCResponse is the body returned by both POST .../indexes/{iid}/gc and
+// POST /v1/admin/gc — they share the same shape (one or many indexes,
+// the response is just the count reclaimed).
+type GCResponse struct {
+	IndexID      string `json:"index_id,omitempty"`
+	DeletedCount int    `json:"deleted_count"`
+}
+
 // MultiSearchRequest is the body for POST /v1/orgs/{org}/users/{user}/search.
 type MultiSearchRequest struct {
 	Query             string   `json:"query"`

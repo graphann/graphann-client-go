@@ -125,3 +125,24 @@ func (c *Client) CleanupOrphans(ctx context.Context) (*CleanupOrphansResponse, e
 	}
 	return &out, nil
 }
+
+// RunIndexGC calls POST /v1/tenants/{tid}/indexes/{iid}/gc. Sweeps every
+// document whose sidecar ExpiresAt has passed and returns the count
+// reclaimed. Idempotent — calling twice in a row returns 0 the second time.
+func (c *Client) RunIndexGC(ctx context.Context, tenantID, indexID string) (*GCResponse, error) {
+	var out GCResponse
+	if err := c.do(ctx, "POST", indexBasePath(tenantID, indexID)+"/gc", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RunAdminGC calls POST /v1/admin/gc. Sweeps expired documents across every
+// loaded index in one shot. Admin-only.
+func (c *Client) RunAdminGC(ctx context.Context) (*GCResponse, error) {
+	var out GCResponse
+	if err := c.do(ctx, "POST", "/v1/admin/gc", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
