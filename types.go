@@ -132,10 +132,12 @@ type AddDocumentsRequest struct {
 }
 
 // AddDocumentsResponse is the response from POST .../documents.
+// ChunkIDs are server-issued UUID strings (store.ChunkID = string),
+// not integers.
 type AddDocumentsResponse struct {
-	Added    int    `json:"added"`
-	IndexID  string `json:"index_id"`
-	ChunkIDs []int  `json:"chunk_ids,omitempty"`
+	Added    int      `json:"added"`
+	IndexID  string   `json:"index_id"`
+	ChunkIDs []string `json:"chunk_ids,omitempty"`
 }
 
 // ImportDocumentsRequest is the body for POST .../import.
@@ -160,11 +162,13 @@ type PendingStatusResponse struct {
 }
 
 // ProcessPendingResponse is the body returned by POST .../process.
+// ChunkIDs are server-issued UUID strings (store.ChunkID = string),
+// not integers.
 type ProcessPendingResponse struct {
-	IndexID       string `json:"index_id"`
-	Processed     int    `json:"processed"`
-	ChunksCreated int    `json:"chunks_created"`
-	ChunkIDs      []int  `json:"chunk_ids,omitempty"`
+	IndexID       string   `json:"index_id"`
+	Processed     int      `json:"processed"`
+	ChunksCreated int      `json:"chunks_created"`
+	ChunkIDs      []string `json:"chunk_ids,omitempty"`
 }
 
 // ClearPendingResponse is the body returned by DELETE .../pending.

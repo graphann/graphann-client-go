@@ -471,9 +471,9 @@ func TestAddDocuments_Roundtrip(t *testing.T) {
 				writeJSON(t, w, 400, map[string]any{"error": map[string]any{"code": "bad_request", "message": err.Error()}})
 				return
 			}
-			ids := make([]int, len(req.Documents))
+			ids := make([]string, len(req.Documents))
 			for i := range req.Documents {
-				ids[i] = i
+				ids[i] = fmt.Sprintf("chunk-%d", i)
 			}
 			writeJSON(t, w, 201, AddDocumentsResponse{
 				Added:    len(req.Documents),
