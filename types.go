@@ -57,19 +57,33 @@ type Index struct {
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at,omitempty"`
 	Path        string      `json:"path,omitempty"`
+	// Compression is the vector compression strategy configured for this index.
+	Compression string      `json:"compression,omitempty"`
+	// Approximate reports whether approximate (HNSW) search is enabled.
+	Approximate bool        `json:"approximate,omitempty"`
 }
 
 // CreateIndexRequest is the body for POST /v1/tenants/{tid}/indexes.
 type CreateIndexRequest struct {
-	ID          string `json:"id,omitempty"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string  `json:"id,omitempty"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
+	// Compression sets the vector compression strategy for the index.
+	// One of "none", "scalar", "binary", "pq", "recompute", or "" (server default).
+	Compression *string `json:"compression,omitempty"`
+	// Approximate, when true, enables approximate (HNSW) search; false uses exact scan.
+	// Nil defers to the server default.
+	Approximate *bool   `json:"approximate,omitempty"`
 }
 
 // UpdateIndexRequest is the body for PATCH /v1/tenants/{tid}/indexes/{iid}.
 type UpdateIndexRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
+	// Compression updates the vector compression strategy. Same values as CreateIndexRequest.
+	Compression *string `json:"compression,omitempty"`
+	// Approximate updates the approximate-search flag.
+	Approximate *bool   `json:"approximate,omitempty"`
 }
 
 // ListIndexesResponse is the body returned by GET /v1/tenants/{tid}/indexes.
@@ -237,6 +251,9 @@ type SearchFilter struct {
 	// MetadataFilter requires each key/value to match the chunk's
 	// sidecar metadata exactly.
 	MetadataFilter map[string]any `json:"metadata_filter,omitempty"`
+	// Equals is a generic metadata pre-filter: every key/value pair must
+	// match the chunk's stored metadata (string equality).
+	Equals map[string]string `json:"equals,omitempty"`
 }
 
 // SearchRequest is the body for POST .../search and friends.
@@ -439,11 +456,19 @@ type DeleteLLMSettingsResponse struct {
 	Settings LLMSettings `json:"settings,omitempty"`
 }
 
-// BuildIndexResponse is the body returned by POST .../indexes/{iid}/build.
-type BuildIndexResponse struct {
-	IndexID string `json:"index_id"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+// UpsertResourceRequest is the body for PUT .../indexes/{iid}/resources/{resID}.
+type UpsertResourceRequest struct {
+	Text     string            `json:"text"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// UpsertResourceResponse is the response from PUT .../indexes/{iid}/resources/{resID}.
+type UpsertResourceResponse struct {
+	ResourceID      string `json:"resource_id"`
+	ChunksAdded     int    `json:"chunks_added"`
+	ChunksTombstoned int    `json:"chunks_tombstoned"`
+	// Operation is "create" on first upsert, "update" on subsequent ones.
+	Operation string `json:"operation"`
 }
 
 // CleanupOrphansResponse is the body returned by POST /v1/admin/cleanup-orphans.

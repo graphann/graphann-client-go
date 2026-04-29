@@ -4,6 +4,30 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-28
+
+### Removed (BREAKING)
+
+- `Client.SearchText` — endpoint `POST .../search/text` removed server-side
+  (strict subset of `/search`). Use `Client.Search` with `req.Query` set.
+- `Client.SearchVector` — endpoint `POST .../search/vector` removed server-side
+  (strict subset of `/search`). Use `Client.Search` with `req.Vector` set.
+- `Client.BuildIndex` — endpoint `POST .../build` was a no-op stub; removed.
+  `BuildIndexResponse` type also removed.
+
+### Added
+
+- `Client.UpsertResource` — `PUT .../indexes/{iid}/resources/{resID}`. Atomic
+  upsert: creates or replaces all chunks for a resource by external ID.
+- `UpsertResourceRequest` / `UpsertResourceResponse` types for the new endpoint.
+- `ErrCompactInProgress` sentinel — returned when `CompactIndex` receives HTTP
+  409 with code `compact_in_progress`. Retryable.
+- `CreateIndexRequest.Compression` / `CreateIndexRequest.Approximate` fields.
+- `UpdateIndexRequest.Compression` / `UpdateIndexRequest.Approximate` fields
+  (PATCH endpoint is now fully functional server-side).
+- `Index.Compression` / `Index.Approximate` response fields.
+- `SearchFilter.Equals` — generic metadata pre-filter (`map[string]string`).
+
 ## [0.2.0] - 2026-04-25
 
 ### Changed (BREAKING)

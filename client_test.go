@@ -618,27 +618,157 @@ func TestDeleteLLMSettings_HitsCanonicalPath(t *testing.T) {
 }
 
 // =============================================================================
-// BuildIndex (deprecated server endpoint, still on the v1 surface)
+// UpsertResource
 // =============================================================================
 
-func TestBuildIndex_ReturnsBuildingStatus(t *testing.T) {
+func TestUpsertResource_Create(t *testing.T) {
 	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
-		"POST /v1/tenants/t/indexes/i/build": func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, 200, BuildIndexResponse{
-				IndexID: "i",
-				Status:  "building",
-				Message: "Index build started",
+		"PUT /v1/tenants/t/indexes/i/resources/res_1": func(w http.ResponseWriter, r *http.Request) {
+			var req UpsertResourceRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(t, w, 400, map[string]any{"error": map[string]any{"code": "bad_request", "message": err.Error()}})
+				return
+			}
+			writeJSON(t, w, 200, UpsertResourceResponse{
+				ResourceID:       "res_1",
+				ChunksAdded:      3,
+				ChunksTombstoned: 0,
+				Operation:        "create",
 			})
 		},
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv)
-	got, err := c.BuildIndex(context.Background(), "t", "i")
+	got, err := c.UpsertResource(context.Background(), "t", "i", "res_1", UpsertResourceRequest{
+		Text: "hello world",
+	})
 	if err != nil {
-		t.Fatalf("BuildIndex: %v", err)
+		t.Fatalf("UpsertResource: %v", err)
 	}
-	if got.IndexID != "i" || got.Status != "building" {
+	if got.ResourceID != "res_1" || got.Operation != "create" || got.ChunksAdded != 3 {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestUpsertResource_Update(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"PUT /v1/tenants/t/indexes/i/resources/res_1": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 200, UpsertResourceResponse{
+				ResourceID:       "res_1",
+				ChunksAdded:      2,
+				ChunksTombstoned: 3,
+				Operation:        "update",
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	got, err := c.UpsertResource(context.Background(), "t", "i", "res_1", UpsertResourceRequest{
+		Text:     "updated text",
+		Metadata: map[string]string{"source": "api"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertResource: %v", err)
+	}
+	if got.Operation != "update" || got.ChunksTombstoned != 3 {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// =============================================================================
+// CompactIndex 409 handling
+// =============================================================================
+
+func TestCompactIndex_409_IsErrCompactInProgress(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/compact": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 409, map[string]any{
+				"error": map[string]any{"code": "compact_in_progress", "message": "Compaction already running"},
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	_, err := c.CompactIndex(context.Background(), "t", "i")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrCompactInProgress) {
+		t.Errorf("want ErrCompactInProgress, got %v", err)
+	}
+}
+
+// =============================================================================
+// CreateIndex with compression + approximate fields
+// =============================================================================
+
+func TestCreateIndex_CompressionAndApproximate(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes": func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			compression := "pq"
+			approx := true
+			writeJSON(t, w, 201, Index{
+				ID:          "i_new",
+				TenantID:    "t",
+				Name:        "pq-index",
+				Status:      IndexStatusEmpty,
+				Compression: "pq",
+				Approximate: true,
+			})
+			_ = compression
+			_ = approx
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	comp := "pq"
+	approx := true
+	got, err := c.CreateIndex(context.Background(), "t", CreateIndexRequest{
+		Name:        "pq-index",
+		Compression: &comp,
+		Approximate: &approx,
+	})
+	if err != nil {
+		t.Fatalf("CreateIndex: %v", err)
+	}
+	if got.Compression != "pq" || !got.Approximate {
+		t.Errorf("got %+v", got)
+	}
+	if !strings.Contains(string(gotBody), `"compression":"pq"`) {
+		t.Errorf("body missing compression: %s", gotBody)
+	}
+	if !strings.Contains(string(gotBody), `"approximate":true`) {
+		t.Errorf("body missing approximate: %s", gotBody)
+	}
+}
+
+// =============================================================================
+// SearchFilter.Equals
+// =============================================================================
+
+func TestSearch_FilterEquals(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/search": func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			writeJSON(t, w, 200, SearchResponse{Total: 0})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	_, err := c.Search(context.Background(), "t", "i", SearchRequest{
+		Query: "q",
+		Filter: SearchFilter{
+			Equals: map[string]string{"env": "prod", "team": "eng"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if !strings.Contains(string(gotBody), `"equals"`) {
+		t.Errorf("body missing equals: %s", gotBody)
 	}
 }
 

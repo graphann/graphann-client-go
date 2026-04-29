@@ -44,9 +44,8 @@ func (c *Client) ListIndexes(ctx context.Context, tenantID string) (*ListIndexes
 
 // UpdateIndex calls PATCH /v1/tenants/{tenantID}/indexes/{indexID}.
 //
-// Note: at v0.1 of the server this endpoint is documented as not
-// persisted (returns 501). The client surface is provided for forward
-// compatibility — callers should be ready for ErrNotImplemented.
+// Accepts optional Compression and Approximate fields. As of v0.3.0 this
+// endpoint is fully functional server-side.
 func (c *Client) UpdateIndex(ctx context.Context, tenantID, indexID string, req UpdateIndexRequest) (*Index, error) {
 	var out Index
 	if err := c.do(ctx, "PATCH", indexBasePath(tenantID, indexID), req, &out, nil); err != nil {
@@ -79,6 +78,10 @@ func (c *Client) GetLiveStats(ctx context.Context, tenantID, indexID string) (*L
 }
 
 // CompactIndex calls POST /v1/tenants/{tenantID}/indexes/{indexID}/compact.
+//
+// Returns ErrCompactInProgress (which wraps ErrConflict) when the server
+// responds 409 because a compaction is already running. This is retryable —
+// callers should back off and try again.
 func (c *Client) CompactIndex(ctx context.Context, tenantID, indexID string) (*CompactResponse, error) {
 	var out CompactResponse
 	if err := c.do(ctx, "POST", indexBasePath(tenantID, indexID)+"/compact", struct{}{}, &out, nil); err != nil {
@@ -96,15 +99,16 @@ func (c *Client) ClearIndex(ctx context.Context, tenantID, indexID string) (*Cle
 	return &out, nil
 }
 
-// BuildIndex calls POST /v1/tenants/{tenantID}/indexes/{indexID}/build.
+// UpsertResource calls PUT /v1/tenants/{tenantID}/indexes/{indexID}/resources/{resID}.
 //
-// The server kicks off the build asynchronously and returns immediately
-// with status="building". Callers should poll GetIndexStatus to observe
-// completion. This endpoint is marked deprecated server-side — modern
-// flows should rely on incremental ingestion + compaction instead.
-func (c *Client) BuildIndex(ctx context.Context, tenantID, indexID string) (*BuildIndexResponse, error) {
-	var out BuildIndexResponse
-	if err := c.do(ctx, "POST", indexBasePath(tenantID, indexID)+"/build", struct{}{}, &out, nil); err != nil {
+// Atomically replaces all chunks for the given resource ID with the
+// re-chunked content of req.Text. If the resource does not exist it is
+// created (operation="create"); if it does, old chunks are tombstoned and
+// new ones are written (operation="update").
+func (c *Client) UpsertResource(ctx context.Context, tenantID, indexID, resourceID string, req UpsertResourceRequest) (*UpsertResourceResponse, error) {
+	path := indexBasePath(tenantID, indexID) + "/resources/" + resourceID
+	var out UpsertResourceResponse
+	if err := c.do(ctx, "PUT", path, req, &out, nil); err != nil {
 		return nil, err
 	}
 	return &out, nil

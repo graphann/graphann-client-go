@@ -6,28 +6,17 @@ import (
 )
 
 // Search calls POST /v1/tenants/{tid}/indexes/{iid}/search. Either
-// req.Query or req.Vector must be set. Honours the Client's query cache
-// and singleflight settings when configured.
+// req.Query (text) or req.Vector (pre-computed embedding) must be set.
+// Honours the Client's query cache and singleflight settings when configured.
+//
+// Note: the /search/text and /search/vector sub-routes were removed server-side
+// as they were strict subsets of /search. Use this method for all search types.
 func (c *Client) Search(ctx context.Context, tenantID, indexID string, req SearchRequest) (*SearchResponse, error) {
 	return c.runSearch(ctx, "/search", tenantID, indexID, req)
 }
 
-// SearchText calls POST /v1/tenants/{tid}/indexes/{iid}/search/text.
-// req.Query is required; req.Vector is ignored.
-func (c *Client) SearchText(ctx context.Context, tenantID, indexID string, req SearchRequest) (*SearchResponse, error) {
-	req.Vector = nil
-	return c.runSearch(ctx, "/search/text", tenantID, indexID, req)
-}
-
-// SearchVector calls POST /v1/tenants/{tid}/indexes/{iid}/search/vector.
-// req.Vector is required; req.Query is ignored.
-func (c *Client) SearchVector(ctx context.Context, tenantID, indexID string, req SearchRequest) (*SearchResponse, error) {
-	req.Query = ""
-	return c.runSearch(ctx, "/search/vector", tenantID, indexID, req)
-}
-
-// runSearch shared by Search, SearchText, SearchVector. Applies the
-// optional cache + singleflight envelopes around the HTTP call.
+// runSearch applies the optional cache + singleflight envelopes around the
+// HTTP call.
 func (c *Client) runSearch(ctx context.Context, suffix, tenantID, indexID string, req SearchRequest) (*SearchResponse, error) {
 	path := indexBasePath(tenantID, indexID) + suffix
 

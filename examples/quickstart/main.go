@@ -54,14 +54,30 @@ func main() {
 	}
 	fmt.Printf("tenant: %s (%s)\n", t.ID, t.Name)
 
+	compression := "pq"
+	approx := true
 	idx, err := c.CreateIndex(ctx, t.ID, graphann.CreateIndexRequest{
 		Name:        "demo",
 		Description: "quickstart corpus",
+		Compression: &compression,
+		Approximate: &approx,
 	})
 	if err != nil {
 		log.Fatalf("CreateIndex: %v", err)
 	}
-	fmt.Printf("index: %s\n", idx.ID)
+	fmt.Printf("index: %s compression=%s approximate=%v\n", idx.ID, idx.Compression, idx.Approximate)
+
+	// Demo: upsert a resource atomically (create or replace).
+	upsertRes, err := c.UpsertResource(ctx, t.ID, idx.ID, "intro-doc", graphann.UpsertResourceRequest{
+		Text:     "GraphANN: storage-efficient vector search via on-demand embedding recomputation.",
+		Metadata: map[string]string{"source": "quickstart"},
+	})
+	if err != nil {
+		log.Printf("UpsertResource: %v (server may not support this endpoint yet)", err)
+	} else {
+		fmt.Printf("upsert: resource=%s operation=%s chunks_added=%d\n",
+			upsertRes.ResourceID, upsertRes.Operation, upsertRes.ChunksAdded)
+	}
 
 	corpus := []graphann.Document{
 		{ID: "doc-1", Text: "Vector databases enable similarity search at scale."},

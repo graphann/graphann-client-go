@@ -20,6 +20,9 @@ var (
 	ErrNotFound = errors.New("graphann: not found")
 	// ErrConflict is returned for HTTP 409.
 	ErrConflict = errors.New("graphann: conflict")
+	// ErrCompactInProgress is returned when POST .../compact responds 409,
+	// indicating a compaction is already running. Safe to retry after a delay.
+	ErrCompactInProgress = errors.New("graphann: compaction already in progress")
 	// ErrPayloadTooLarge is returned for HTTP 413.
 	ErrPayloadTooLarge = errors.New("graphann: payload too large")
 	// ErrRateLimited is returned for HTTP 429. The retry-after duration
@@ -119,6 +122,9 @@ func sentinelFor(status int, code string) error {
 	case 404:
 		return ErrNotFound
 	case 409:
+		if code == "compact_in_progress" {
+			return ErrCompactInProgress
+		}
 		return ErrConflict
 	case 413:
 		return ErrPayloadTooLarge
