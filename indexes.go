@@ -3,6 +3,8 @@ package graphann
 import (
 	"context"
 	"net/url"
+	"strconv"
+	"time"
 )
 
 // indexBasePath returns /v1/tenants/{tid}/indexes/{iid}.
@@ -116,11 +118,30 @@ func (c *Client) UpsertResource(ctx context.Context, tenantID, indexID, resource
 
 // CleanupOrphans calls POST /v1/admin/cleanup-orphans. Admin-only on the
 // server; sweeps stale compaction artifacts (*.old, *.compact, *.backup,
-// *.failed) from every tenant's data directory using a 1h minimum-age
-// guard so in-flight compactions are not disturbed.
-func (c *Client) CleanupOrphans(ctx context.Context) (*CleanupOrphansResponse, error) {
+// *.failed) and pre-reembed snapshots (*.pre-reembed.<timestamp>) from
+// every tenant's data directory.
+//
+// minAge is the minimum age before an orphan is eligible for removal; pass
+// 0 to use the server default (1h). The server enforces a 5-minute floor —
+// passing a smaller positive value is rejected with 400.
+//
+// When dryRun is true, the server enumerates what *would* have been
+// removed without touching disk. The returned response echoes the
+// effective min_age and dry_run so callers can confirm what happened.
+func (c *Client) CleanupOrphans(ctx context.Context, minAge time.Duration, dryRun bool) (*CleanupOrphansResponse, error) {
+	q := url.Values{}
+	if minAge > 0 {
+		q.Set("min_age", minAge.String())
+	}
+	if dryRun {
+		q.Set("dry_run", strconv.FormatBool(dryRun))
+	}
 	var out CleanupOrphansResponse
-	if err := c.do(ctx, "POST", "/v1/admin/cleanup-orphans", struct{}{}, &out, nil); err != nil {
+	opts := &requestOpts{}
+	if len(q) > 0 {
+		opts.query = q
+	}
+	if err := c.do(ctx, "POST", "/v1/admin/cleanup-orphans", struct{}{}, &out, opts); err != nil {
 		return nil, err
 	}
 	return &out, nil

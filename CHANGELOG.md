@@ -4,6 +4,17 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (BREAKING)
+
+- `Client.CleanupOrphans` signature is now
+  `CleanupOrphans(ctx, minAge time.Duration, dryRun bool)`. Pass `0, false`
+  to preserve the previous behaviour (server defaults: 1h min-age, real
+  sweep). Server enforces a 5-minute floor on positive `minAge` values.
+- `CleanupOrphansResponse` gains `MinAge` (Go duration string echoed by
+  the server) and `DryRun` fields. Both are present on every response.
+
 ## [0.3.0] - 2026-04-28
 
 ### Removed (BREAKING)

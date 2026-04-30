@@ -779,20 +779,77 @@ func TestSearch_FilterEquals(t *testing.T) {
 func TestCleanupOrphans_HappyPath(t *testing.T) {
 	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
 		"POST /v1/admin/cleanup-orphans": func(w http.ResponseWriter, r *http.Request) {
+			// No query params → server applies its 1h default.
+			if got := r.URL.Query().Get("min_age"); got != "" {
+				t.Errorf("default call sent min_age=%q; want unset", got)
+			}
+			if got := r.URL.Query().Get("dry_run"); got != "" {
+				t.Errorf("default call sent dry_run=%q; want unset", got)
+			}
 			writeJSON(t, w, 200, CleanupOrphansResponse{
 				Removed:    []string{"/data/tenants/t/indexes/i/seg.old"},
 				FreedBytes: 4096,
+				MinAge:     "1h0m0s",
+				DryRun:     false,
 			})
 		},
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv)
-	got, err := c.CleanupOrphans(context.Background())
+	got, err := c.CleanupOrphans(context.Background(), 0, false)
 	if err != nil {
 		t.Fatalf("CleanupOrphans: %v", err)
 	}
 	if got.FreedBytes != 4096 || len(got.Removed) != 1 {
 		t.Errorf("got %+v", got)
+	}
+	if got.MinAge != "1h0m0s" {
+		t.Errorf("MinAge=%q want 1h0m0s", got.MinAge)
+	}
+	if got.DryRun {
+		t.Errorf("DryRun=true want false")
+	}
+}
+
+func TestCleanupOrphans_PassesMinAgeAndDryRun(t *testing.T) {
+	var (
+		gotMinAge string
+		gotDryRun string
+	)
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/admin/cleanup-orphans": func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			gotMinAge = q.Get("min_age")
+			gotDryRun = q.Get("dry_run")
+			writeJSON(t, w, 200, CleanupOrphansResponse{
+				Removed:    []string{"/data/tenants/t/indexes/i/foo.pre-reembed.20260101T000000Z"},
+				FreedBytes: 0,
+				MinAge:     "24h0m0s",
+				DryRun:     true,
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+
+	got, err := c.CleanupOrphans(context.Background(), 24*time.Hour, true)
+	if err != nil {
+		t.Fatalf("CleanupOrphans: %v", err)
+	}
+	if gotMinAge != "24h0m0s" {
+		t.Errorf("server saw min_age=%q want 24h0m0s", gotMinAge)
+	}
+	if gotDryRun != "true" {
+		t.Errorf("server saw dry_run=%q want true", gotDryRun)
+	}
+	if !got.DryRun {
+		t.Errorf("response DryRun should round-trip true")
+	}
+	if got.MinAge != "24h0m0s" {
+		t.Errorf("response MinAge=%q want 24h0m0s", got.MinAge)
+	}
+	if len(got.Removed) != 1 {
+		t.Errorf("Removed=%v want 1 entry", got.Removed)
 	}
 }
 

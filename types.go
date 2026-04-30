@@ -476,9 +476,15 @@ type UpsertResourceResponse struct {
 }
 
 // CleanupOrphansResponse is the body returned by POST /v1/admin/cleanup-orphans.
+//
+// MinAge is a Go-style duration string (e.g. "1h0m0s") echoing the
+// minimum-age cutoff the server actually applied. DryRun echoes the
+// dry-run flag — when true, Removed is what *would* have been removed.
 type CleanupOrphansResponse struct {
 	Removed    []string `json:"removed"`
 	FreedBytes int64    `json:"freed_bytes"`
+	MinAge     string   `json:"min_age,omitempty"`
+	DryRun     bool     `json:"dry_run,omitempty"`
 }
 
 // GCResponse is the body returned by both POST .../indexes/{iid}/gc and
