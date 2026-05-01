@@ -266,14 +266,48 @@ type SearchRequest struct {
 	Vector []float32    `json:"vector,omitempty"`
 	K      int          `json:"k,omitempty"`
 	Filter SearchFilter `json:"filter,omitempty"`
+
+	// Rerank, when true, rescores the top-CandidateK HNSW candidates
+	// with the server-configured cross-encoder reranker and returns the
+	// top-RerankK (or top-K if RerankK is unset). No-op when the server
+	// has no reranker configured (--reranker-url unset) — flipping this
+	// on a non-rerank-aware deployment is safe.
+	//
+	// Only applies to the text Query path. Vector-only requests ignore
+	// Rerank since the cross-encoder needs raw query text.
+	Rerank bool `json:"rerank,omitempty"`
+
+	// CandidateK is the size of the first-stage candidate pool fed to
+	// the reranker. Effective only when Rerank is true. Zero defaults
+	// to max(4*K, 50). The server clamps to [K, 1000].
+	CandidateK int `json:"candidate_k,omitempty"`
+
+	// RerankK is the number of results to return after reranking.
+	// Effective only when Rerank is true. Zero defaults to K.
+	RerankK int `json:"rerank_k,omitempty"`
 }
 
 // SearchResult is one hit in a SearchResponse.
+//
+// Score is always the first-stage cosine similarity (higher is better).
+// Clients can rely on this single scale regardless of whether the
+// request asked for reranking.
+//
+// RerankScore is non-nil only when the server actually applied the
+// cross-encoder reranker to this result — i.e. the request set
+// Rerank=true AND the server has a reranker configured AND the
+// rerank call succeeded. When non-nil, RerankScore is the reranker's
+// native relevance score (different scale from cosine; typically
+// roughly -10..10 for bge-reranker-v2-m3) and the result order
+// reflects RerankScore. When nil, results are ordered by Score and
+// the client should treat the response as a regular non-reranked
+// search.
 type SearchResult struct {
-	ID       string  `json:"id"`
-	Text     string  `json:"text,omitempty"`
-	Score    float32 `json:"score"`
-	Metadata any     `json:"metadata,omitempty"`
+	ID          string   `json:"id"`
+	Text        string   `json:"text,omitempty"`
+	Score       float32  `json:"score"`
+	RerankScore *float32 `json:"rerank_score,omitempty"`
+	Metadata    any      `json:"metadata,omitempty"`
 }
 
 // SearchResponse is the body returned by .../search endpoints.

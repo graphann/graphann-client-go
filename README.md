@@ -32,6 +32,38 @@ res, _ := c.Search(context.Background(), "t_demo", idx.ID, graphann.SearchReques
 A full end-to-end example (tenant + index + ingest + search + hot model
 swap) lives at [`examples/quickstart/main.go`](./examples/quickstart/main.go).
 
+### Cross-encoder reranking (optional)
+
+When the server has a reranker configured (via `--reranker-url`), opt in
+per-query with `Rerank: true`. The reranker rescores the top-`CandidateK`
+HNSW candidates and returns the top-`RerankK` (or top-`K`) by relevance.
+No-op against servers without a reranker — safe to set unconditionally.
+
+```go
+res, _ := c.Search(ctx, "t_demo", idx.ID, graphann.SearchRequest{
+    Query:      "what does the standard say about audit trails?",
+    K:          10,
+    Rerank:     true,   // opt-in per query
+    CandidateK: 50,     // HNSW pool size before rerank (optional, default max(4*K, 50))
+    RerankK:    10,     // post-rerank result count (optional, default K)
+})
+// res.Results[i].Score remains the cosine similarity (always populated).
+// res.Results[i].RerankScore is non-nil ONLY when the server actually
+// reranked this result; it carries the cross-encoder's native score
+// and reflects the result ordering. When nil, the server didn't
+// rerank and ordering is by Score (cosine).
+for _, r := range res.Results {
+    if r.RerankScore != nil {
+        // Reranked: ordered by *r.RerankScore.
+    } else {
+        // First-stage only: ordered by r.Score.
+    }
+}
+```
+
+See `docs/RERANKER.md` in the server repo for setup, model choice
+(bge-reranker-v2-m3 vs qwen3-reranker), and tuning guidance.
+
 ## Public surface
 
 ```go

@@ -4,6 +4,30 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-01
+
+### Added
+
+- `SearchRequest.Rerank`, `SearchRequest.CandidateK`, `SearchRequest.RerankK`
+  fields wire the optional cross-encoder reranker. When the server has a
+  reranker configured (via `--reranker-url`), set `Rerank: true` to rescore
+  the top-`CandidateK` HNSW candidates with the reranker and return the
+  top-`RerankK` (or top-`K`). Defaults: `CandidateK = max(4*K, 50)`,
+  `RerankK = K`. No-op against non-rerank-aware servers — safe to roll
+  out unconditionally.
+- `SearchResult.RerankScore *float32` — populated only when the server
+  actually applied the reranker. Carries the cross-encoder's native
+  relevance score (different scale from cosine, typically -10..10 for
+  bge-reranker-v2-m3). When non-nil, it also reflects the result
+  ordering. When nil, the response is ordered by `Score` (cosine).
+
+### Unchanged
+
+- `SearchResult.Score` is still always the first-stage cosine
+  similarity, regardless of rerank state. Existing client code that
+  only reads `Score` keeps working — even when accidentally hitting a
+  rerank-enabled endpoint.
+
 ## [0.5.0] - 2026-04-30
 
 ### Changed (BREAKING)
