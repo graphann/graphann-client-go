@@ -2,6 +2,8 @@ package graphann
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -81,12 +83,52 @@ func (c *Client) GetLiveStats(ctx context.Context, tenantID, indexID string) (*L
 
 // CompactIndex calls POST /v1/tenants/{tenantID}/indexes/{indexID}/compact.
 //
-// Returns ErrCompactInProgress (which wraps ErrConflict) when the server
-// responds 409 because a compaction is already running. This is retryable —
-// callers should back off and try again.
+// Compaction runs asynchronously server-side — the 200 response only
+// acknowledges the start. The endpoint provides no poll handle;
+// completion is observed via GetLiveStats or server logs.
+//
+// Returns an error matching both ErrCompactInProgress and ErrConflict
+// when the server responds 409 because a compaction is already running.
+// This is retryable — callers should back off and try again.
 func (c *Client) CompactIndex(ctx context.Context, tenantID, indexID string) (*CompactResponse, error) {
 	var out CompactResponse
 	if err := c.do(ctx, "POST", indexBasePath(tenantID, indexID)+"/compact", struct{}{}, &out, nil); err != nil {
+		// The server signals "compaction already running" as a plain 409
+		// with code "conflict". Join the dedicated sentinel so callers can
+		// errors.Is(err, ErrCompactInProgress) without string matching,
+		// while errors.Is(err, ErrConflict) keeps working.
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict {
+			apiErr.sentinel = errors.Join(apiErr.sentinel, ErrCompactInProgress)
+		}
+		return nil, err
+	}
+	return &out, nil
+}
+
+// FlushIndex calls POST /v1/tenants/{tenantID}/indexes/{indexID}/flush.
+//
+// Persists the live index's in-memory delta. Any pending deferred bulk
+// graph (from AddDocumentsRequest.Bulk) is built once — concurrently —
+// inside the flush and persisted with it. Pairs with the
+// DeferSave/Bulk ingest options; safe to call on a clean index.
+func (c *Client) FlushIndex(ctx context.Context, tenantID, indexID string) (*FlushIndexResponse, error) {
+	var out FlushIndexResponse
+	if err := c.do(ctx, "POST", indexBasePath(tenantID, indexID)+"/flush", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RebuildGraph calls POST /v1/tenants/{tenantID}/indexes/{indexID}/rebuild-graph.
+//
+// In-place delta-HNSW rebuild — a migration endpoint for indexes
+// ingested before the 2026-06 neighbor-selection fix, whose fragmented
+// graphs cap recall. Returns 409 (ErrConflict) while a compaction is in
+// progress.
+func (c *Client) RebuildGraph(ctx context.Context, tenantID, indexID string) (*RebuildGraphResponse, error) {
+	var out RebuildGraphResponse
+	if err := c.do(ctx, "POST", indexBasePath(tenantID, indexID)+"/rebuild-graph", struct{}{}, &out, nil); err != nil {
 		return nil, err
 	}
 	return &out, nil

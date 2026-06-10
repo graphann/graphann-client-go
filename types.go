@@ -124,20 +124,54 @@ type Document struct {
 	RepoID    string `json:"repo_id,omitempty"`
 	FilePath  string `json:"file_path,omitempty"`
 	CommitSHA string `json:"commit_sha,omitempty"`
+
+	// Vector is an optional precomputed embedding. When EVERY document in
+	// the batch carries a non-empty Vector, the server skips embedding and
+	// ingests the vectors directly. Mixed batches (some documents with a
+	// vector, some without) are rejected with 400 validation_error.
+	//
+	// The vector length must match the index dimension once it is set;
+	// the first ingest into a fresh index fixes the dimension. Precomputed
+	// inserts are idempotent by external ID (upsert semantics), so the
+	// per-document Upsert flag is ignored on this path.
+	Vector []float32 `json:"vector,omitempty"`
 }
 
 // AddDocumentsRequest is the body for POST .../documents.
 type AddDocumentsRequest struct {
 	Documents []Document `json:"documents"`
+
+	// DeferSave, when true, skips the per-batch full-delta save. Data
+	// stays in memory (index dirty) but is still searchable. Persist with
+	// Client.FlushIndex once the batch sequence is complete.
+	DeferSave bool `json:"defer_save,omitempty"`
+
+	// Bulk implies DeferSave and additionally defers the per-node HNSW
+	// insert — the delta graph is built once, concurrently, at flush.
+	// Bulk-ingested data is NOT searchable until the graph is built,
+	// with one safety net: the first search against a pending deferred
+	// build transparently triggers it (build-on-read), so searches never
+	// silently miss bulk data. Defaults (both false) preserve the
+	// per-batch, immediately-searchable behaviour.
+	Bulk bool `json:"bulk,omitempty"`
 }
 
 // AddDocumentsResponse is the response from POST .../documents.
 // ChunkIDs are server-issued UUID strings (store.ChunkID = string),
 // not integers.
+//
+// ExternalIDs is present only when the server minted at least one
+// ExternalID (which happens on sharded ingest of ID-less documents —
+// ExternalID is the shard routing key). When present it carries one
+// entry per submitted document, positionally aligned with the request
+// array, mixing minted and client-supplied IDs. Persist these as the
+// durable document IDs. Unsharded ingests never mint, so the field is
+// absent (nil) there.
 type AddDocumentsResponse struct {
-	Added    int      `json:"added"`
-	IndexID  string   `json:"index_id"`
-	ChunkIDs []string `json:"chunk_ids,omitempty"`
+	Added       int      `json:"added"`
+	IndexID     string   `json:"index_id"`
+	ChunkIDs    []string `json:"chunk_ids,omitempty"`
+	ExternalIDs []string `json:"external_ids,omitempty"`
 }
 
 // ImportDocumentsRequest is the body for POST .../import.
@@ -285,6 +319,14 @@ type SearchRequest struct {
 	// RerankK is the number of results to return after reranking.
 	// Effective only when Rerank is true. Zero defaults to K.
 	RerankK int `json:"rerank_k,omitempty"`
+
+	// EfSearch overrides the HNSW search-time beam width (ef) for this
+	// query. Zero (or omitted) uses the server default (`--search-ef`,
+	// default 64). The server clamps rather than rejects: negative values
+	// map to the server default and values above 2000 are capped. Some
+	// modes apply local floors on top of the request, and binary/PQ flat
+	// scans ignore ef entirely.
+	EfSearch int `json:"ef_search,omitempty"`
 }
 
 // SearchResult is one hit in a SearchResponse.
@@ -311,9 +353,30 @@ type SearchResult struct {
 }
 
 // SearchResponse is the body returned by .../search endpoints.
+//
+// The sharded-search fields (Partial, ShardsTotal, ShardsOK,
+// DegradedShards) are populated ONLY when the request was served by the
+// scatter-gather path — a clustered deployment where the index has more
+// than one shard. On every other deployment the response is exactly
+// {results, total} and the optional fields stay nil. Check Partial != nil
+// to detect the sharded path.
+//
+// Sharded-path caveats: Rerank/CandidateK/RerankK are not applied,
+// text queries are embedded once on the coordinator, and results are
+// deduplicated by external ID keeping the highest score.
 type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Total   int            `json:"total"`
+
+	// Partial is true when at least one shard contributed nothing.
+	Partial *bool `json:"partial,omitempty"`
+	// ShardsTotal is the number of shards queried.
+	ShardsTotal *int `json:"shards_total,omitempty"`
+	// ShardsOK is the number of shards that responded successfully.
+	ShardsOK *int `json:"shards_ok,omitempty"`
+	// DegradedShards lists the shard IDs that failed or degraded.
+	// Present only when non-empty.
+	DegradedShards []string `json:"degraded_shards,omitempty"`
 }
 
 // LiveStatsResponse is the body returned by GET .../live-stats.
@@ -344,6 +407,20 @@ type ClearIndexResponse struct {
 	IndexID string `json:"index_id"`
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
+}
+
+// FlushIndexResponse is the body returned by POST .../flush.
+type FlushIndexResponse struct {
+	Flushed bool `json:"flushed"`
+}
+
+// RebuildGraphResponse is the body returned by POST .../rebuild-graph.
+type RebuildGraphResponse struct {
+	Rebuilt bool `json:"rebuilt"`
+	// Chunks is the number of chunks reinserted into the rebuilt delta graph.
+	Chunks int `json:"chunks"`
+	// WallMS is the wall-clock rebuild time in milliseconds.
+	WallMS int `json:"wall_ms"`
 }
 
 // ChunkResponse is the body returned by GET .../chunks/{chunkID}.

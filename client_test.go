@@ -1133,6 +1133,316 @@ func TestError_PayloadTooLarge(t *testing.T) {
 }
 
 // =============================================================================
+// Precomputed-vector ingest + defer_save/bulk options + external_ids
+// =============================================================================
+
+func TestAddDocuments_PrecomputedVectors(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/documents": func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			writeJSON(t, w, 201, AddDocumentsResponse{
+				Added:    1,
+				IndexID:  "i",
+				ChunkIDs: []string{"chunk-uuid-1"},
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.AddDocuments(context.Background(), "t", "i", AddDocumentsRequest{
+		Documents: []Document{{ID: "doc1", Text: "abc", Vector: []float32{0.25, 0.5}}},
+	})
+	if err != nil {
+		t.Fatalf("AddDocuments: %v", err)
+	}
+	if res.Added != 1 {
+		t.Errorf("got %+v", res)
+	}
+	if !strings.Contains(string(gotBody), `"vector":[0.25,0.5]`) {
+		t.Errorf("body missing vector: %s", gotBody)
+	}
+	// defer_save / bulk left unset must not be serialized.
+	if strings.Contains(string(gotBody), "defer_save") || strings.Contains(string(gotBody), `"bulk"`) {
+		t.Errorf("body has unset defer_save/bulk: %s", gotBody)
+	}
+}
+
+func TestAddDocuments_DeferSaveAndBulk(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/documents": func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			writeJSON(t, w, 201, AddDocumentsResponse{Added: 2, IndexID: "i"})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	_, err := c.AddDocuments(context.Background(), "t", "i", AddDocumentsRequest{
+		Documents: []Document{{Text: "a"}, {Text: "b"}},
+		DeferSave: true,
+		Bulk:      true,
+	})
+	if err != nil {
+		t.Fatalf("AddDocuments: %v", err)
+	}
+	if !strings.Contains(string(gotBody), `"defer_save":true`) {
+		t.Errorf("body missing defer_save: %s", gotBody)
+	}
+	if !strings.Contains(string(gotBody), `"bulk":true`) {
+		t.Errorf("body missing bulk: %s", gotBody)
+	}
+}
+
+func TestAddDocuments_ExternalIDsRoundTrip(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/documents": func(w http.ResponseWriter, r *http.Request) {
+			// Sharded ingest of ID-less docs: server mints ExternalIDs and
+			// returns them positionally aligned with the request array.
+			writeJSON(t, w, 201, AddDocumentsResponse{
+				Added:       2,
+				IndexID:     "i",
+				ChunkIDs:    []string{"c1", "c2"},
+				ExternalIDs: []string{"minted-1", "client-2"},
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.AddDocuments(context.Background(), "t", "i", AddDocumentsRequest{
+		Documents: []Document{{Text: "a"}, {ID: "client-2", Text: "b"}},
+	})
+	if err != nil {
+		t.Fatalf("AddDocuments: %v", err)
+	}
+	if len(res.ExternalIDs) != 2 || res.ExternalIDs[0] != "minted-1" || res.ExternalIDs[1] != "client-2" {
+		t.Errorf("external_ids: %v", res.ExternalIDs)
+	}
+}
+
+func TestAddDocuments_ExternalIDsAbsentStaysNil(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/documents": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 201, AddDocumentsResponse{Added: 1, IndexID: "i"})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.AddDocuments(context.Background(), "t", "i", AddDocumentsRequest{
+		Documents: []Document{{ID: "doc1", Text: "a"}},
+	})
+	if err != nil {
+		t.Fatalf("AddDocuments: %v", err)
+	}
+	if res.ExternalIDs != nil {
+		t.Errorf("ExternalIDs should be nil when omitted, got %v", res.ExternalIDs)
+	}
+}
+
+// =============================================================================
+// FlushIndex
+// =============================================================================
+
+func TestFlushIndex_SendsJSONBodyAndDecodes(t *testing.T) {
+	var (
+		gotContentType string
+		gotBody        []byte
+	)
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/flush": func(w http.ResponseWriter, r *http.Request) {
+			gotContentType = r.Header.Get("Content-Type")
+			gotBody, _ = io.ReadAll(r.Body)
+			writeJSON(t, w, 200, FlushIndexResponse{Flushed: true})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.FlushIndex(context.Background(), "t", "i")
+	if err != nil {
+		t.Fatalf("FlushIndex: %v", err)
+	}
+	if !res.Flushed {
+		t.Errorf("got %+v", res)
+	}
+	// The server's ContentTypeMiddleware rejects body-less POSTs without
+	// the JSON content type — the SDK must always send `{}` + the header.
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type: %q, want application/json", gotContentType)
+	}
+	if strings.TrimSpace(string(gotBody)) != "{}" {
+		t.Errorf("body: %q, want {}", gotBody)
+	}
+}
+
+// =============================================================================
+// RebuildGraph
+// =============================================================================
+
+func TestRebuildGraph_Roundtrip(t *testing.T) {
+	var gotContentType string
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/rebuild-graph": func(w http.ResponseWriter, r *http.Request) {
+			gotContentType = r.Header.Get("Content-Type")
+			writeJSON(t, w, 200, RebuildGraphResponse{Rebuilt: true, Chunks: 52000, WallMS: 1234})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.RebuildGraph(context.Background(), "t", "i")
+	if err != nil {
+		t.Fatalf("RebuildGraph: %v", err)
+	}
+	if !res.Rebuilt || res.Chunks != 52000 || res.WallMS != 1234 {
+		t.Errorf("got %+v", res)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type: %q, want application/json", gotContentType)
+	}
+}
+
+func TestRebuildGraph_409_IsErrConflict(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/rebuild-graph": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 409, map[string]any{
+				"error": map[string]any{"code": "conflict", "message": "compaction in progress"},
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	_, err := c.RebuildGraph(context.Background(), "t", "i")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("want ErrConflict, got %v", err)
+	}
+}
+
+// =============================================================================
+// Per-query ef_search
+// =============================================================================
+
+func TestSearch_EfSearchSerialized(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/search": func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			writeJSON(t, w, 200, SearchResponse{Total: 0})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	if _, err := c.Search(context.Background(), "t", "i", SearchRequest{Query: "q", K: 5, EfSearch: 128}); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if !strings.Contains(string(gotBody), `"ef_search":128`) {
+		t.Errorf("body missing ef_search: %s", gotBody)
+	}
+}
+
+func TestSearch_EfSearchZeroOmitted(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/search": func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			writeJSON(t, w, 200, SearchResponse{Total: 0})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	if _, err := c.Search(context.Background(), "t", "i", SearchRequest{Query: "q", K: 5}); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if strings.Contains(string(gotBody), "ef_search") {
+		t.Errorf("zero ef_search must be omitted: %s", gotBody)
+	}
+}
+
+// =============================================================================
+// Sharded-search additive response fields
+// =============================================================================
+
+func TestSearch_ShardedResponseFields(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/search": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{
+				"results": [{"id": "c1", "score": 0.9}],
+				"total": 1,
+				"partial": true,
+				"shards_total": 3,
+				"shards_ok": 2,
+				"degraded_shards": ["shard-2"]
+			}`))
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.Search(context.Background(), "t", "i", SearchRequest{Query: "q", K: 5})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Partial == nil || !*res.Partial {
+		t.Errorf("Partial: %v, want true", res.Partial)
+	}
+	if res.ShardsTotal == nil || *res.ShardsTotal != 3 {
+		t.Errorf("ShardsTotal: %v, want 3", res.ShardsTotal)
+	}
+	if res.ShardsOK == nil || *res.ShardsOK != 2 {
+		t.Errorf("ShardsOK: %v, want 2", res.ShardsOK)
+	}
+	if len(res.DegradedShards) != 1 || res.DegradedShards[0] != "shard-2" {
+		t.Errorf("DegradedShards: %v", res.DegradedShards)
+	}
+}
+
+func TestSearch_LocalResponseLeavesShardFieldsNil(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/search": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"results": [], "total": 0}`))
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.Search(context.Background(), "t", "i", SearchRequest{Query: "q"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Partial != nil || res.ShardsTotal != nil || res.ShardsOK != nil || res.DegradedShards != nil {
+		t.Errorf("shard fields must stay nil on local path: %+v", res)
+	}
+}
+
+// =============================================================================
+// CompactIndex 409 with plain "conflict" code
+// =============================================================================
+
+func TestCompactIndex_409_ConflictCode_IsErrCompactInProgress(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/indexes/i/compact": func(w http.ResponseWriter, r *http.Request) {
+			// The server signals an in-flight compaction with the generic
+			// "conflict" code, not "compact_in_progress".
+			writeJSON(t, w, 409, map[string]any{
+				"error": map[string]any{"code": "conflict", "message": "compaction already in progress for this index"},
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	_, err := c.CompactIndex(context.Background(), "t", "i")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrCompactInProgress) {
+		t.Errorf("want ErrCompactInProgress, got %v", err)
+	}
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("ErrConflict must still match, got %v", err)
+	}
+}
+
+// =============================================================================
 // strconv import sanity (avoid unused import in editor reorders)
 // =============================================================================
 

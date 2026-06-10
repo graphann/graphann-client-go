@@ -4,6 +4,59 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-10
+
+### Added
+
+- `Document.Vector []float32` — precomputed-vector ingest. When every
+  document in an `AddDocuments` batch carries a non-empty vector, the
+  server skips embedding and ingests the vectors directly. Mixed batches
+  (some with, some without) are rejected with 400 `validation_error`.
+  Vector length must match the index dimension once set; the first
+  ingest into a fresh index fixes the dimension. Precomputed inserts are
+  idempotent by external ID, so the per-document `Upsert` flag is
+  ignored on this path. Note the server's 16 MB request-body cap limits
+  precomputed batches to roughly 1700 documents.
+- `AddDocumentsRequest.DeferSave` / `AddDocumentsRequest.Bulk` — bulk-load
+  ingest options. `DeferSave` skips the per-batch save (data stays in
+  memory, still searchable); `Bulk` additionally defers the per-node HNSW
+  insert so the delta graph is built once at flush. Bulk data is not
+  searchable until the graph is built — except via build-on-read: the
+  first search against a pending deferred build triggers it server-side.
+  Defaults (both false) preserve the existing behaviour.
+- `Client.FlushIndex` — `POST .../indexes/{iid}/flush`. Persists the live
+  index's in-memory delta and builds any pending deferred bulk graph in
+  the same flush. Pairs with `DeferSave`/`Bulk`; safe on a clean index.
+- `Client.RebuildGraph` — `POST .../indexes/{iid}/rebuild-graph`. In-place
+  delta-HNSW rebuild for indexes ingested before the 2026-06
+  neighbor-selection fix. Returns 409 (`ErrConflict`) while a compaction
+  is running.
+- `AddDocumentsResponse.ExternalIDs []string` — present only when the
+  server minted at least one ExternalID (sharded ingest of ID-less
+  documents). Positionally aligned with the request array, mixing minted
+  and client-supplied IDs; persist these as the durable document IDs.
+  Absent (nil) on unsharded deployments.
+- `SearchRequest.EfSearch` — per-query HNSW beam-width override. Zero
+  uses the server default (`--search-ef`, default 64); the server clamps
+  negative values to the default and caps at 2000. Binary/PQ flat scans
+  ignore ef entirely.
+- `SearchResponse.Partial *bool`, `ShardsTotal *int`, `ShardsOK *int`,
+  `DegradedShards []string` — optional sharded scatter-gather fields,
+  populated only when a clustered server fans the query out across more
+  than one shard (`Partial != nil` detects that path). All other
+  deployments keep the exact pre-sharding `{results, total}` shape.
+  Sharded-path caveats: rerank options are not applied, and results are
+  deduplicated by external ID keeping the highest score.
+
+### Changed
+
+- `Client.CompactIndex` now maps any HTTP 409 from the compact endpoint
+  to an error matching **both** `ErrCompactInProgress` and `ErrConflict`.
+  The server signals an in-flight compaction with the generic `conflict`
+  code, which previously only matched `ErrConflict`. Existing
+  `errors.Is(err, ErrConflict)` checks keep working.
+- `Version` constant bumped to `0.7.0` (was stale at `0.4.0`).
+
 ## [0.6.0] - 2026-05-01
 
 ### Added
