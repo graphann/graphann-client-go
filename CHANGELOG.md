@@ -4,6 +4,34 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-17
+
+### Fixed
+
+- API-key wire contract corrected to match the server
+  (`internal/server/apikey_handlers.go`). The create response now decodes
+  the one-time secret from the `plaintext` JSON field (was `key`), the list
+  response wrapper key is `api_keys` (was `keys`), and the request/response
+  structs carry only the fields the server actually emits. Invented fields
+  that the server never sends were removed: `prefix`, `expires_at`,
+  `tenant_id`, and the list `total`.
+  - `CreateAPIKey` now returns `*CreateAPIKeyResponse`
+    (`{id, name, user_id, plaintext, created_at}`) instead of `*APIKey`.
+  - `ListAPIKeysResponse` now holds `APIKeys []APIKeyListItem`
+    (`{id, user_id, name, created_at, last_used_at}`) instead of
+    `Keys []APIKey` + `Total`.
+  - The `APIKey` struct was removed.
+
+  This is mildly breaking: code that read `resp.Plaintext` on the old
+  `*APIKey` create result, or `resp.Keys` / `resp.Total` on the list
+  result, must move to `CreateAPIKeyResponse.Plaintext` and
+  `ListAPIKeysResponse.APIKeys`. The method names are unchanged.
+
+### Added
+
+- `AGENTS.md` — an LLM-usage guide for coding agents, grounded in the
+  current SDK surface.
+
 ## [0.7.0] - 2026-06-10
 
 ### Added

@@ -5,14 +5,8 @@ import (
 	"net/url"
 )
 
-// apiKeysPath returns /v1/tenants/{tenantID}/api-keys.
-//
-// Note: as of the GraphANN server v0.1, API key management does NOT have
-// a public HTTP route — keys are minted via the CLI (`leann tenant
-// create-api-key`) and the Go-level tenant package. The methods below
-// model the forthcoming RESTful contract so SDK callers can wire UIs
-// today; expect ErrNotFound until the server ships these routes. Track
-// in the server backlog under `feat/admin-api-keys`.
+// apiKeysPath returns /v1/tenants/{tenantID}/api-keys, the tenant-scoped
+// admin route for API key create/list/revoke.
 func apiKeysPath(tenantID string) string {
 	return "/v1/tenants/" + url.PathEscape(tenantID) + "/api-keys"
 }
@@ -22,8 +16,8 @@ func apiKeysPath(tenantID string) string {
 // The plaintext key is returned in the response's Plaintext field
 // exactly once. The server stores only the argon2id hash; lose the
 // plaintext and the only recovery is to rotate the key.
-func (c *Client) CreateAPIKey(ctx context.Context, tenantID string, req CreateAPIKeyRequest) (*APIKey, error) {
-	var out APIKey
+func (c *Client) CreateAPIKey(ctx context.Context, tenantID string, req CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
+	var out CreateAPIKeyResponse
 	if err := c.do(ctx, "POST", apiKeysPath(tenantID), req, &out, nil); err != nil {
 		return nil, err
 	}

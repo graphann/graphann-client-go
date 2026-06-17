@@ -4,7 +4,7 @@ Official Go client SDK for the [GraphANN](https://graphann.com) vector
 database.
 
 - Module: `github.com/graphann/graphann-client-go`
-- Latest: `v0.4.0`
+- Latest: `v0.8.0`
 - License: see [`./LICENSE`](./LICENSE)
 
 The SDK speaks the v1 HTTP API and exposes idiomatic Go types for
@@ -13,7 +13,7 @@ tenant, index, document, search, job, cluster, and settings operations.
 ## Install
 
 ```bash
-go get github.com/graphann/graphann-client-go@v0.4.0
+go get github.com/graphann/graphann-client-go@v0.8.0
 ```
 
 `proxy.golang.org` mirrors the module — no auth or env tweaks
@@ -143,8 +143,8 @@ func (c *Client) GetLLMSettings   (ctx context.Context, orgID string)           
 func (c *Client) UpdateLLMSettings(ctx context.Context, orgID string, settings LLMSettings)    (*LLMSettings, error)
 func (c *Client) DeleteLLMSettings(ctx context.Context, orgID string)                          (*DeleteLLMSettingsResponse, error)
 
-// API key management (admin-only; forward-looking — see apikey.go)
-func (c *Client) CreateAPIKey(ctx context.Context, tenantID string, req CreateAPIKeyRequest) (*APIKey, error)
+// API key management (admin-only)
+func (c *Client) CreateAPIKey(ctx context.Context, tenantID string, req CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
 func (c *Client) RevokeAPIKey(ctx context.Context, tenantID, keyID string)                    error
 func (c *Client) ListAPIKeys (ctx context.Context, tenantID string)                          (*ListAPIKeysResponse, error)
 ```

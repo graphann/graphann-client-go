@@ -1443,6 +1443,105 @@ func TestCompactIndex_409_ConflictCode_IsErrCompactInProgress(t *testing.T) {
 }
 
 // =============================================================================
+// API keys — wire contract (matches server internal/server/apikey_handlers.go)
+// =============================================================================
+
+// TestCreateAPIKey_ParsesPlaintext asserts the create response decodes the
+// one-time secret from the server's "plaintext" JSON field, and that the
+// request carries both user_id and name.
+func TestCreateAPIKey_ParsesPlaintext(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"POST /v1/tenants/t/api-keys": func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				writeJSON(t, w, 400, map[string]any{"error": map[string]any{"code": "bad_request", "message": err.Error()}})
+				return
+			}
+			// Server response shape: {id, name, user_id, plaintext, created_at}.
+			writeJSON(t, w, 201, map[string]any{
+				"id":         "key_1",
+				"name":       "ci",
+				"user_id":    "u_1",
+				"plaintext":  "gak_secret_value",
+				"created_at": "2026-06-17T00:00:00Z",
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+
+	res, err := c.CreateAPIKey(context.Background(), "t", CreateAPIKeyRequest{UserID: "u_1", Name: "ci"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+	if res.Plaintext != "gak_secret_value" {
+		t.Errorf("plaintext: got %q want %q", res.Plaintext, "gak_secret_value")
+	}
+	if res.ID != "key_1" || res.Name != "ci" || res.UserID != "u_1" {
+		t.Errorf("response fields: got %+v", res)
+	}
+	if res.CreatedAt != "2026-06-17T00:00:00Z" {
+		t.Errorf("created_at: got %q", res.CreatedAt)
+	}
+	// Request must send both user_id and name.
+	if gotBody["user_id"] != "u_1" || gotBody["name"] != "ci" {
+		t.Errorf("request body: got %+v", gotBody)
+	}
+}
+
+// TestListAPIKeys_ParsesAPIKeysWrapper asserts the list response decodes the
+// "api_keys" wrapper and per-item fields the server emits.
+func TestListAPIKeys_ParsesAPIKeysWrapper(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"GET /v1/tenants/t/api-keys": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, 200, map[string]any{
+				"api_keys": []map[string]any{
+					{
+						"id":           "key_1",
+						"user_id":      "u_1",
+						"name":         "ci",
+						"created_at":   "2026-06-17T00:00:00Z",
+						"last_used_at": "2026-06-17T01:00:00Z",
+					},
+				},
+			})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+
+	res, err := c.ListAPIKeys(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("ListAPIKeys: %v", err)
+	}
+	if len(res.APIKeys) != 1 {
+		t.Fatalf("api_keys length: got %d want 1 (%+v)", len(res.APIKeys), res)
+	}
+	it := res.APIKeys[0]
+	if it.ID != "key_1" || it.UserID != "u_1" || it.Name != "ci" {
+		t.Errorf("item fields: got %+v", it)
+	}
+	if it.CreatedAt != "2026-06-17T00:00:00Z" || it.LastUsedAt != "2026-06-17T01:00:00Z" {
+		t.Errorf("item timestamps: got %+v", it)
+	}
+}
+
+// TestRevokeAPIKey_HitsKeyPath asserts the revoke path includes the key ID.
+func TestRevokeAPIKey_HitsKeyPath(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"DELETE /v1/tenants/t/api-keys/key_1": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+
+	if err := c.RevokeAPIKey(context.Background(), "t", "key_1"); err != nil {
+		t.Fatalf("RevokeAPIKey: %v", err)
+	}
+}
+
+// =============================================================================
 // strconv import sanity (avoid unused import in editor reorders)
 // =============================================================================
 

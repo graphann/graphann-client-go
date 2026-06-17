@@ -663,30 +663,36 @@ type SyncDocumentsResponse struct {
 	IndexType  string `json:"index_type"`
 }
 
-// APIKey is the public projection of a tenant API key.
-type APIKey struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	UserID    string    `json:"user_id,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	Prefix    string    `json:"prefix,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	// Plaintext is set by CreateAPIKey on the response and ONLY then —
-	// the server returns the secret exactly once and it is not
-	// recoverable.
-	Plaintext string `json:"key,omitempty"`
+// CreateAPIKeyRequest is the body for POST /v1/tenants/{tid}/api-keys.
+// The server reads both fields. UserID is optional; when set, ties the key
+// to a user. Name is the key's human-readable label.
+type CreateAPIKeyRequest struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
 }
 
-// CreateAPIKeyRequest is the body for POST /v1/tenants/{tid}/api-keys.
-type CreateAPIKeyRequest struct {
-	Name string `json:"name"`
-	// UserID is optional; when set, ties the key to a user.
-	UserID string `json:"user_id,omitempty"`
+// CreateAPIKeyResponse is the body returned by POST /v1/tenants/{tid}/api-keys.
+// Plaintext is the secret token and is returned EXACTLY ONCE — the server
+// stores only an argon2id hash, so callers must persist it client-side.
+type CreateAPIKeyResponse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	UserID    string `json:"user_id"`
+	Plaintext string `json:"plaintext"`
+	CreatedAt string `json:"created_at"`
+}
+
+// APIKeyListItem is one key as returned by the list endpoint. The plaintext
+// and hash are never exposed here — only metadata an admin would want.
+type APIKeyListItem struct {
+	ID         string `json:"id"`
+	UserID     string `json:"user_id"`
+	Name       string `json:"name"`
+	CreatedAt  string `json:"created_at"`
+	LastUsedAt string `json:"last_used_at,omitempty"`
 }
 
 // ListAPIKeysResponse is the body returned by GET /v1/tenants/{tid}/api-keys.
 type ListAPIKeysResponse struct {
-	Keys  []APIKey `json:"keys"`
-	Total int      `json:"total"`
+	APIKeys []APIKeyListItem `json:"api_keys"`
 }
