@@ -4,7 +4,7 @@ Official Go client SDK for the [GraphANN](https://graphann.com) vector
 database.
 
 - Module: `github.com/graphann/graphann-client-go`
-- Latest: `v0.8.0`
+- Version: `v0.9.1`
 - License: see [`./LICENSE`](./LICENSE)
 
 The SDK speaks the v1 HTTP API and exposes idiomatic Go types for
@@ -12,12 +12,11 @@ tenant, index, document, search, job, cluster, and settings operations.
 
 ## Install
 
-```bash
-go get github.com/graphann/graphann-client-go@v0.8.0
-```
+Install the tagged release from GitHub:
 
-`proxy.golang.org` mirrors the module — no auth or env tweaks
-required, the toolchain resolves it like any other public module.
+```bash
+go get github.com/graphann/graphann-client-go@v0.9.1
+```
 
 ## 5-line quickstart
 
@@ -52,6 +51,8 @@ res, _ := c.Search(ctx, "t_demo", idx.ID, graphann.SearchRequest{
 // reranked this result; it carries the cross-encoder's native score
 // and reflects the result ordering. When nil, the server didn't
 // rerank and ordering is by Score (cosine).
+// res.RerankApplied distinguishes true, explicit false, and absent (nil).
+// Sharded text searches can rerank on the coordinator.
 for _, r := range res.Results {
     if r.RerankScore != nil {
         // Reranked: ordered by *r.RerankScore.
@@ -119,10 +120,8 @@ func (c *Client) ListDocuments        (ctx context.Context, tenantID, indexID st
 func (c *Client) GetChunk             (ctx context.Context, tenantID, indexID string, chunkID int)                     (*ChunkResponse, error)
 func (c *Client) DeleteChunks         (ctx context.Context, tenantID, indexID string, req DeleteChunksRequest)         (*DeleteChunksResponse, error)
 
-// Search
+// Search — unified: text via req.Query, vector via req.Vector (one of the two required)
 func (c *Client) Search       (ctx context.Context, tenantID, indexID string, req SearchRequest)      (*SearchResponse, error)
-func (c *Client) SearchText   (ctx context.Context, tenantID, indexID string, req SearchRequest)      (*SearchResponse, error)
-func (c *Client) SearchVector (ctx context.Context, tenantID, indexID string, req SearchRequest)      (*SearchResponse, error)
 func (c *Client) MultiSearch  (ctx context.Context, orgID, userID string, req MultiSearchRequest)     (*MultiSearchResponse, error)
 func (c *Client) SyncDocuments(ctx context.Context, orgID string, req SyncDocumentsRequest)           (*SyncDocumentsResponse, error)
 func (c *Client) ListUserIndexes  (ctx context.Context, orgID, userID string)                         (*ListIndexesResponse, error)
@@ -186,17 +185,34 @@ Sentinels: `ErrUnauthorized`, `ErrForbidden`, `ErrNotFound`,
   `WithRetryPolicy`. Default: 3 attempts, 100ms base, 5s cap, 20% jitter.
 - **Body cap**: every response body is read through
   `io.LimitReader(resp.Body, 50 MiB)` to bound memory usage.
-- **gzip**: request bodies above 64 KiB are gzip-compressed; the SDK
-  honours `Accept-Encoding: gzip` on responses.
-- **User-Agent**: `graphann-go/0.1.0 (go1.21+; goos/goarch)` by default.
+- **gzip**: request bodies remain plain JSON at every size. The SDK
+  requests and decodes gzip-compressed responses.
+- **User-Agent**: `graphann-go/0.9.1 (go1.21+; goos/goarch)` by default.
 - **Singleflight**: opt-in with `WithSingleflight(window)`. Concurrent
   identical search requests are coalesced; the result stays sticky for
   `window` after completion.
 - **Query cache**: opt-in with `WithQueryCache(max, ttl)`. LRU + TTL
   cache of `*SearchResponse`, keyed on
   `(tenantID, indexID, request fingerprint)`.
+  Successful mutations invalidate the full cache and singleflight generation.
+  Reads already in flight can return their original result, but cannot seed
+  the new cache or be joined by reads started after a mutation completes.
 - **Metrics hook**: `WithMetricsHook` registers a callback invoked on
   every request — useful for Prometheus counters or OpenTelemetry spans.
+
+## Regenerating wire types
+
+Install `oapi-codegen`, then run the generator:
+
+```bash
+go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+scripts/generate-types.sh
+```
+
+The generator and staleness test prefer `api/openapi/spec.yaml` in this
+repository, then `../api/openapi/spec.yaml` in the shared SDK checkout.
+Set `GRAPHANN_SPEC` to override the schema path. The staleness test runs
+with the unit tests when `oapi-codegen` is available.
 
 ## Testing
 

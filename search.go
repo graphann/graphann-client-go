@@ -22,21 +22,29 @@ func (c *Client) runSearch(ctx context.Context, suffix, tenantID, indexID string
 
 	// fingerprint over the request and resource so cache + singleflight
 	// don't collide across endpoints.
-	key := fingerprint(suffix, tenantID, indexID, req)
+	c.cacheMu.Lock()
+	generation := c.cacheGeneration
+	key := fingerprint(generation, suffix, tenantID, indexID, req)
 
 	if c.cache != nil && key != "" {
 		if cached, ok := c.cache.Get(key); ok {
+			c.cacheMu.Unlock()
 			return cached, nil
 		}
 	}
+	c.cacheMu.Unlock()
 
 	exec := func() (any, error) {
 		var out SearchResponse
-		if err := c.do(ctx, "POST", path, req, &out, nil); err != nil {
+		if err := c.do(ctx, "POST", path, req, &out, &requestOpts{readOnly: true}); err != nil {
 			return nil, err
 		}
 		if c.cache != nil && key != "" {
-			c.cache.Set(key, &out)
+			c.cacheMu.Lock()
+			if c.cacheGeneration == generation {
+				c.cache.Set(key, &out)
+			}
+			c.cacheMu.Unlock()
 		}
 		return &out, nil
 	}
@@ -56,12 +64,30 @@ func (c *Client) runSearch(ctx context.Context, suffix, tenantID, indexID string
 	return v.(*SearchResponse), nil
 }
 
+// BatchSearch calls POST /v1/tenants/{tid}/indexes/{iid}/search/batch.
+// Runs multiple independent queries against one index in a single HTTP
+// request — each entry in req.Queries is a full SearchRequest, so a batch
+// can mix text and vector queries, per-query K, filters, rerank and
+// hybrid settings. Capped at 128 queries per request server-side. One
+// query failing does not fail the batch: its slot in the response's
+// Responses carries Error instead of Results/Total. Bypasses the query
+// cache and singleflight envelope that Search uses — intended for
+// offline/pipeline callers, not interactive ones.
+func (c *Client) BatchSearch(ctx context.Context, tenantID, indexID string, req BatchSearchRequest) (*BatchSearchResponse, error) {
+	path := indexBasePath(tenantID, indexID) + "/search/batch"
+	var out BatchSearchResponse
+	if err := c.do(ctx, "POST", path, req, &out, &requestOpts{readOnly: true}); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // MultiSearch calls POST /v1/orgs/{orgID}/users/{userID}/search and
 // returns the merged result set across the user's accessible indexes.
 func (c *Client) MultiSearch(ctx context.Context, orgID, userID string, req MultiSearchRequest) (*MultiSearchResponse, error) {
 	path := "/v1/orgs/" + url.PathEscape(orgID) + "/users/" + url.PathEscape(userID) + "/search"
 	var out MultiSearchResponse
-	if err := c.do(ctx, "POST", path, req, &out, nil); err != nil {
+	if err := c.do(ctx, "POST", path, req, &out, &requestOpts{readOnly: true}); err != nil {
 		return nil, err
 	}
 	return &out, nil

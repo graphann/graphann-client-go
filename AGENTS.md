@@ -9,9 +9,9 @@ All methods take a `context.Context` first and return `(*T, error)` (or just
 
 ## Install
 
-```bash
-go get github.com/graphann/graphann-client-go@v0.8.0
-```
+Install the GitHub release with
+`go get github.com/graphann/graphann-client-go@v0.9.1`;
+see [README installation](README.md#install).
 
 ## Client construction + auth
 
@@ -52,7 +52,7 @@ tnt, err := c.CreateTenant(ctx, graphann.CreateTenantRequest{Name: "demo"})
 ## Create index
 
 `Compression` and `Approximate` are pointers — leave nil to take the server
-default. Compression values: `"none"`, `"scalar"`, `"binary"`, `"pq"`,
+default. Compression values: "scalar", "binary", "pq",
 `"recompute"`.
 
 ```go
@@ -214,7 +214,7 @@ Sentinels: `ErrUnauthorized` (401), `ErrNotFound` (404), `ErrConflict` (409),
   build-on-read search. Call `FlushIndex` when you need durability and full
   searchability after a bulk load.
 - `Search.Rerank` is a no-op on the text path when the server has no reranker
-  configured, and is ignored entirely on vector-only requests and on the
-  sharded scatter-gather path.
+  configured, and is ignored on vector-only requests. Sharded text searches
+  support coordinator-side reranking; inspect `SearchResponse.RerankApplied`.
 - `CreateIndexRequest.Compression` / `Approximate` are pointers: nil means
   "server default", not "off".

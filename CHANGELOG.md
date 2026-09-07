@@ -4,6 +4,74 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-09-07
+
+### Fixed
+
+- Regeneration and the staleness check support standalone GitHub checkouts
+  with `api/openapi/spec.yaml`, while retaining the shared monorepo schema
+  fallback and `GRAPHANN_SPEC` override.
+- The runtime User-Agent reports 0.9.1. Installation instructions use the
+  GitHub `v0.9.1` tag instead of a local module replacement.
+
+### Distribution
+
+- This SDK is distributed through tagged GitHub source releases. See
+  [installation](README.md#install).
+
+## [0.9.0] - Unreleased
+
+### Added
+
+- The nine endpoints that no SDK, in any language, previously implemented. All
+  nine were absent because `api/openapi/spec.yaml` omitted them, not because any
+  one client lagged: backup lifecycle (list, create, delete, restore),
+  `POST .../search/batch`, `POST .../indexes/compact-all`, `GET /v1/license/status`,
+  `GET /v1/license/audit`, and `GET /v1/admin/embed-space`.
+- Six request fields that were likewise unreachable:
+  - `hybrid` — fuses dense results with BM25 lexical ranking via RRF. Text
+    queries only, default off. Previously undocumented anywhere in the SDKs.
+  - `vector_b64` — query vector as base64 little-endian float32, mutually
+    exclusive with `vector`. Exists because JSON float parsing measured 17.5% of
+    server CPU under load.
+  - `omit_text` (on the search filter) — drops chunk text from results. Text is
+    ~75% of the response body at k=10, and omitting it also skips a zstd
+    decompression server-side.
+  - `embedding_endpoint`, `embedding_dimension`, `embedding_api_key_env` — the
+    per-index embedder override, which is in production use.
+
+### Changed
+
+- Generated wire types now supplement the handwritten API using the server's
+  OpenAPI spec. The spec is vendored at `api/openapi/spec.yaml` in this
+  repository, so generation is reproducible from a fresh clone.
+- A staleness check regenerates the types and byte-compares them against what is
+  committed, failing if they differ. It runs as part of the normal test task.
+
+### Fixed
+
+- Request bodies remain plain JSON above 64 KiB; gzip response decoding is
+  retained. The server does not support gzip request bodies.
+- Successful mutations invalidate all cached searches. Generation-scoped
+  singleflight prevents new reads from joining pre-mutation requests, and
+  delayed responses cannot repopulate the cache after invalidation.
+- Resource IDs are path-escaped, including slashes, query delimiters, and `%`.
+- `SearchResponse.RerankApplied *bool` preserves omitted, false, and true.
+  Sharded text searches support coordinator-side reranking.
+- The runtime User-Agent was updated to 0.9.0. Installation instructions at
+  that time used a local checkout.
+- The search documentation described "hybrid search" as supplying either a text
+  query or a vector. That is dense search with two input modes; it is not what
+  hybrid means. The wording came from the spec, which titled the plain search
+  operation "Hybrid search" and never documented the real `hybrid` flag. Corrected
+  here and at the source.
+
+### Notes
+
+Generated wire types supplement the handwritten API; they do not replace
+every handwritten request or response type. For the current GitHub release,
+see [installation](README.md#install).
+
 ## [0.8.0] - 2026-06-17
 
 ### Fixed
@@ -73,8 +141,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   populated only when a clustered server fans the query out across more
   than one shard (`Partial != nil` detects that path). All other
   deployments keep the exact pre-sharding `{results, total}` shape.
-  Sharded-path caveats: rerank options are not applied, and results are
-  deduplicated by external ID keeping the highest score.
+  Results are deduplicated by external ID keeping the highest score.
+  Sharded text searches now support coordinator-side reranking.
 
 ### Changed
 

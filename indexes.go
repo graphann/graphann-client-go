@@ -150,7 +150,7 @@ func (c *Client) ClearIndex(ctx context.Context, tenantID, indexID string) (*Cle
 // created (operation="create"); if it does, old chunks are tombstoned and
 // new ones are written (operation="update").
 func (c *Client) UpsertResource(ctx context.Context, tenantID, indexID, resourceID string, req UpsertResourceRequest) (*UpsertResourceResponse, error) {
-	path := indexBasePath(tenantID, indexID) + "/resources/" + resourceID
+	path := indexBasePath(tenantID, indexID) + "/resources/" + url.PathEscape(resourceID)
 	var out UpsertResourceResponse
 	if err := c.do(ctx, "PUT", path, req, &out, nil); err != nil {
 		return nil, err
@@ -205,6 +205,33 @@ func (c *Client) RunIndexGC(ctx context.Context, tenantID, indexID string) (*GCR
 func (c *Client) RunAdminGC(ctx context.Context) (*GCResponse, error) {
 	var out GCResponse
 	if err := c.do(ctx, "POST", "/v1/admin/gc", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CompactAllIndexes calls POST /v1/tenants/{tenantID}/indexes/compact-all.
+// Queues every index owned by the tenant onto the compaction scheduler;
+// indexes compact one at a time. An index already queued or in flight is
+// reported in the response's Skipped rather than re-queued. Returns 409
+// (ErrConflict) if the server has no compaction scheduler wired. Track
+// progress via ListJobs.
+func (c *Client) CompactAllIndexes(ctx context.Context, tenantID string) (*CompactAllResponse, error) {
+	var out CompactAllResponse
+	if err := c.do(ctx, "POST", indexCollectionPath(tenantID)+"/compact-all", struct{}{}, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetEmbedSpaceAdmin calls GET /v1/admin/embed-space. Admin-only
+// fleet-wide embedding-space observability: one row per catalog index
+// (cold indexes included — their on-disk header is peeked, not loaded)
+// reporting whether it's being fingerprint-checked and against what
+// state. sum(Counts) always equals len(Indexes).
+func (c *Client) GetEmbedSpaceAdmin(ctx context.Context) (*EmbedSpaceAdminResponse, error) {
+	var out EmbedSpaceAdminResponse
+	if err := c.do(ctx, "GET", "/v1/admin/embed-space", nil, &out, nil); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -58,22 +58,22 @@ type Index struct {
 	UpdatedAt   time.Time   `json:"updated_at,omitempty"`
 	Path        string      `json:"path,omitempty"`
 	// Compression is the vector compression strategy configured for this index.
-	Compression string      `json:"compression,omitempty"`
+	Compression string `json:"compression,omitempty"`
 	// Approximate reports whether approximate (HNSW) search is enabled.
-	Approximate bool        `json:"approximate,omitempty"`
+	Approximate bool `json:"approximate,omitempty"`
 }
 
 // CreateIndexRequest is the body for POST /v1/tenants/{tid}/indexes.
 type CreateIndexRequest struct {
-	ID          string  `json:"id,omitempty"`
-	Name        string  `json:"name"`
-	Description string  `json:"description,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 	// Compression sets the vector compression strategy for the index.
-	// One of "none", "scalar", "binary", "pq", "recompute", or "" (server default).
+	// One of "scalar", "binary", "pq", "recompute", or "" (server default).
 	Compression *string `json:"compression,omitempty"`
 	// Approximate, when true, enables approximate (HNSW) search; false uses exact scan.
 	// Nil defers to the server default.
-	Approximate *bool   `json:"approximate,omitempty"`
+	Approximate *bool `json:"approximate,omitempty"`
 }
 
 // UpdateIndexRequest is the body for PATCH /v1/tenants/{tid}/indexes/{iid}.
@@ -83,7 +83,25 @@ type UpdateIndexRequest struct {
 	// Compression updates the vector compression strategy. Same values as CreateIndexRequest.
 	Compression *string `json:"compression,omitempty"`
 	// Approximate updates the approximate-search flag.
-	Approximate *bool   `json:"approximate,omitempty"`
+	Approximate *bool `json:"approximate,omitempty"`
+
+	// EmbeddingBackend sets a per-index embedding backend override.
+	// Remote backends only — per-index local_onnx is unsupported; use
+	// the process embedder for local models. Setting "" clears the
+	// override back to the process-wide embedder.
+	EmbeddingBackend *string `json:"embedding_backend,omitempty"`
+	// EmbeddingModel is the backend model identifier (e.g.
+	// "text-embedding-3-small"), used when EmbeddingBackend is set.
+	EmbeddingModel *string `json:"embedding_model,omitempty"`
+	// EmbeddingDimension is the expected output dimension for the
+	// per-index embedding override.
+	EmbeddingDimension *int `json:"embedding_dimension,omitempty"`
+	// EmbeddingEndpoint overrides the backend base URL. SSRF-validated
+	// server-side (public http/https hosts only).
+	EmbeddingEndpoint *string `json:"embedding_endpoint,omitempty"`
+	// EmbeddingAPIKeyEnv names the ENV VAR holding the backend key —
+	// never send the key itself in this field.
+	EmbeddingAPIKeyEnv *string `json:"embedding_api_key_env,omitempty"`
 }
 
 // ListIndexesResponse is the body returned by GET /v1/tenants/{tid}/indexes.
@@ -135,6 +153,16 @@ type Document struct {
 	// inserts are idempotent by external ID (upsert semantics), so the
 	// per-document Upsert flag is ignored on this path.
 	Vector []float32 `json:"vector,omitempty"`
+
+	// VectorB64 is Vector as base64-encoded little-endian float32
+	// (numpy `astype('<f4').tobytes()` / `binary.LittleEndian`) — a
+	// cheaper-to-decode alternative for bulk loads. Set one of Vector /
+	// VectorB64, never both.
+	VectorB64 string `json:"vector_b64,omitempty"`
+
+	// Content is an alias for Text; the server accepts either, and Text
+	// takes precedence when both are set.
+	Content string `json:"content,omitempty"`
 }
 
 // AddDocumentsRequest is the body for POST .../documents.
@@ -292,6 +320,12 @@ type SearchFilter struct {
 	// Equals is a generic metadata pre-filter: every key/value pair must
 	// match the chunk's stored metadata (string equality).
 	Equals map[string]string `json:"equals,omitempty"`
+
+	// OmitText drops chunk text from every result. Off by default so an
+	// existing client sees exactly what it saw before; worth setting
+	// when the caller already holds the text (RAG pipelines reading
+	// from their own store, reranking stages keyed on ids).
+	OmitText bool `json:"omit_text,omitempty"`
 }
 
 // SearchRequest is the body for POST .../search and friends.
@@ -327,6 +361,18 @@ type SearchRequest struct {
 	// modes apply local floors on top of the request, and binary/PQ flat
 	// scans ignore ef entirely.
 	EfSearch int `json:"ef_search,omitempty"`
+
+	// Hybrid fuses dense (semantic) results with a BM25 lexical ranking
+	// via Reciprocal Rank Fusion. Applies to text Query searches only;
+	// ignored for vector-only requests. False (default) is dense-only.
+	// Falls back to dense-only results if the lexical index can't be
+	// built, so flipping this on is always safe.
+	Hybrid bool `json:"hybrid,omitempty"`
+
+	// VectorB64 is Vector as base64-encoded little-endian float32 — an
+	// alternative encoding of the query vector that is cheaper to
+	// decode. Mutually exclusive with Vector; set one or the other.
+	VectorB64 string `json:"vector_b64,omitempty"`
 }
 
 // SearchResult is one hit in a SearchResponse.
@@ -357,13 +403,10 @@ type SearchResult struct {
 // The sharded-search fields (Partial, ShardsTotal, ShardsOK,
 // DegradedShards) are populated ONLY when the request was served by the
 // scatter-gather path — a clustered deployment where the index has more
-// than one shard. On every other deployment the response is exactly
-// {results, total} and the optional fields stay nil. Check Partial != nil
-// to detect the sharded path.
+// than one shard. Check Partial != nil to detect the sharded path.
 //
-// Sharded-path caveats: Rerank/CandidateK/RerankK are not applied,
-// text queries are embedded once on the coordinator, and results are
-// deduplicated by external ID keeping the highest score.
+// Sharded text queries are embedded once on the coordinator. Results are
+// deduplicated by external ID before optional coordinator-side reranking.
 type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Total   int            `json:"total"`
@@ -377,6 +420,9 @@ type SearchResponse struct {
 	// DegradedShards lists the shard IDs that failed or degraded.
 	// Present only when non-empty.
 	DegradedShards []string `json:"degraded_shards,omitempty"`
+	// RerankApplied reports whether the server applied reranking. Nil means
+	// the server did not report this field; false explicitly means skipped.
+	RerankApplied *bool `json:"rerank_applied,omitempty"`
 }
 
 // LiveStatsResponse is the body returned by GET .../live-stats.
@@ -579,8 +625,8 @@ type UpsertResourceRequest struct {
 
 // UpsertResourceResponse is the response from PUT .../indexes/{iid}/resources/{resID}.
 type UpsertResourceResponse struct {
-	ResourceID      string `json:"resource_id"`
-	ChunksAdded     int    `json:"chunks_added"`
+	ResourceID       string `json:"resource_id"`
+	ChunksAdded      int    `json:"chunks_added"`
 	ChunksTombstoned int    `json:"chunks_tombstoned"`
 	// Operation is "create" on first upsert, "update" on subsequent ones.
 	Operation string `json:"operation"`

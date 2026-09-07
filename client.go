@@ -21,7 +21,7 @@ import (
 )
 
 // Version is the SDK version. Embedded in the User-Agent.
-const Version = "0.8.0"
+const Version = "0.9.1"
 
 // defaultUserAgent is computed once.
 var defaultUserAgent = fmt.Sprintf(
@@ -33,9 +33,6 @@ var defaultUserAgent = fmt.Sprintf(
 // cannot OOM the client. 50 MiB matches the server's outbound cap on
 // embedding responses.
 const maxResponseBodyBytes = 50 << 20
-
-// gzipThreshold is the size at which request bodies are compressed.
-const gzipThreshold = 64 << 10 // 64 KiB
 
 // authHeaderTenant is the canonical tenant ID header.
 const authHeaderTenant = "X-Tenant-ID"
@@ -53,6 +50,9 @@ type Client struct {
 	httpClient *http.Client
 	cache      *queryCache
 	sf         *sfGroup
+
+	cacheMu         sync.Mutex
+	cacheGeneration uint64
 
 	rngMu sync.Mutex
 	rng   *rand.Rand
@@ -150,6 +150,8 @@ type requestOpts struct {
 	extraHeaders http.Header
 	// noRetry forces a single attempt regardless of the policy.
 	noRetry bool
+	// readOnly marks POST requests that do not mutate server state.
+	readOnly bool
 }
 
 // do performs an HTTP request with retry/backoff and decodes JSON into
@@ -199,31 +201,13 @@ func (c *Client) attemptOnce(ctx context.Context, method, path string, body any,
 		return err
 	}
 
-	var (
-		bodyReader io.Reader
-		bodyBytes  []byte
-		gzEncoded  bool
-	)
+	var bodyReader io.Reader
 	if body != nil {
 		bb, mErr := json.Marshal(body)
 		if mErr != nil {
 			return errors.Join(ErrConfig, mErr)
 		}
-		bodyBytes = bb
-		if len(bb) > gzipThreshold {
-			var buf bytes.Buffer
-			gz := gzip.NewWriter(&buf)
-			if _, werr := gz.Write(bb); werr != nil {
-				return errors.Join(ErrConfig, werr)
-			}
-			if cerr := gz.Close(); cerr != nil {
-				return errors.Join(ErrConfig, cerr)
-			}
-			bodyReader = &buf
-			gzEncoded = true
-		} else {
-			bodyReader = bytes.NewReader(bb)
-		}
+		bodyReader = bytes.NewReader(bb)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, target, bodyReader)
@@ -232,11 +216,6 @@ func (c *Client) attemptOnce(ctx context.Context, method, path string, body any,
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Content-Length", strconv.Itoa(len(bodyBytes)))
-		if gzEncoded {
-			req.Header.Set("Content-Encoding", "gzip")
-			req.Header.Del("Content-Length")
-		}
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -263,6 +242,15 @@ func (c *Client) attemptOnce(ctx context.Context, method, path string, body any,
 		return wrapNet(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 &&
+		(method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete) &&
+		(opts == nil || !opts.readOnly) {
+		c.cacheMu.Lock()
+		c.cacheGeneration++
+		c.cache.Purge()
+		c.cacheMu.Unlock()
+	}
 
 	rdr := io.Reader(resp.Body)
 	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {

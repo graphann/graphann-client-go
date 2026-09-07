@@ -1,6 +1,7 @@
 package graphann
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -896,15 +897,22 @@ func TestMetricsHook_FiresOnEachRequest(t *testing.T) {
 // Compression on large bodies
 // =============================================================================
 
-func TestRequestBody_GzippedAboveThreshold(t *testing.T) {
-	bigText := strings.Repeat("A", 100*1024) // 100 KiB
-	var gotEnc string
+func TestRequestBody_LargePlainJSON(t *testing.T) {
+	bigText := strings.Repeat("A", 100*1024)
 	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
 		"POST /v1/tenants/t/indexes/i/documents": func(w http.ResponseWriter, r *http.Request) {
-			gotEnc = r.Header.Get("Content-Encoding")
-			// We don't decode here — the server normally would. Just
-			// drain the body so the reader doesn't error on the client.
-			_, _ = io.Copy(io.Discard, r.Body)
+			if enc := r.Header.Get("Content-Encoding"); enc != "" {
+				t.Errorf("Content-Encoding: %q, want none", enc)
+			}
+			var req AddDocumentsRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode plain JSON: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if len(req.Documents) != 1 || req.Documents[0].Text != bigText {
+				t.Error("large document changed in transit")
+			}
 			writeJSON(t, w, 201, AddDocumentsResponse{Added: 1, IndexID: "i"})
 		},
 	}))
@@ -914,9 +922,6 @@ func TestRequestBody_GzippedAboveThreshold(t *testing.T) {
 		Documents: []Document{{Text: bigText}},
 	}); err != nil {
 		t.Fatalf("AddDocuments: %v", err)
-	}
-	if gotEnc != "gzip" {
-		t.Errorf("Content-Encoding: %q, want gzip", gotEnc)
 	}
 }
 
@@ -1546,3 +1551,210 @@ func TestRevokeAPIKey_HitsKeyPath(t *testing.T) {
 // =============================================================================
 
 var _ = strconv.Itoa
+
+func TestUpsertResource_EscapesIdentifiers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		want := "/v1/tenants/t%20%2F%3F%23%25/indexes/i%20%2F%3F%23%25/resources/r%20%2F%3F%23%25"
+		if r.URL.EscapedPath() != want || r.URL.RawQuery != "" {
+			t.Errorf("request URL: %s, want %s", r.URL, want)
+		}
+		writeJSON(t, w, 200, UpsertResourceResponse{})
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	if _, err := c.UpsertResource(context.Background(), "t /?#%", "i /?#%", "r /?#%", UpsertResourceRequest{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResponseBody_GzipDecoded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		if _, err := gz.Write([]byte(`{"results":[{"id":"compressed","score":0.9}],"total":1}`)); err != nil {
+			t.Error(err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	res, err := c.Search(context.Background(), "t", "i", SearchRequest{Query: "q"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Results) != 1 || res.Results[0].ID != "compressed" {
+		t.Fatalf("decoded response: %+v", res)
+	}
+}
+
+func TestSearch_MutationsInvalidateAllCachedResults(t *testing.T) {
+	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
+		t.Run(method, func(t *testing.T) {
+			var calls atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/search") {
+					writeJSON(t, w, 200, SearchResponse{Total: int(calls.Add(1))})
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer srv.Close()
+			c := newTestClient(t, srv, WithQueryCache(10, time.Minute), WithSingleflight(time.Minute))
+			ctx := context.Background()
+			for _, index := range []string{"a", "b"} {
+				if _, err := c.Search(ctx, "t", index, SearchRequest{Query: "q"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := c.do(ctx, method, "/v1/tenants/other/indexes/changed", nil, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			for _, index := range []string{"a", "b"} {
+				res, err := c.Search(ctx, "t", index, SearchRequest{Query: "q"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.Total <= 2 {
+					t.Fatalf("stale search after mutation: %+v", res)
+				}
+			}
+		})
+	}
+}
+
+func TestSearch_ReadOnlyAndFailedMutationsPreserveCache(t *testing.T) {
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tenants/t/indexes/i/search" {
+			writeJSON(t, w, 200, SearchResponse{Total: int(calls.Add(1))})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/documents") {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeJSON(t, w, 200, map[string]any{})
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv, WithQueryCache(10, time.Minute))
+	ctx := context.Background()
+	if _, err := c.Search(ctx, "t", "i", SearchRequest{Query: "q"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.BatchSearch(ctx, "t", "i", BatchSearchRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.MultiSearch(ctx, "o", "u", MultiSearchRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddDocuments(ctx, "t", "i", AddDocumentsRequest{}); err == nil {
+		t.Fatal("expected rejected mutation")
+	}
+	res, err := c.Search(ctx, "t", "i", SearchRequest{Query: "q"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Total != 1 || calls.Load() != 1 {
+		t.Fatalf("read-only or failed request invalidated cached search: %+v", res)
+	}
+}
+
+func TestSearch_DelayedReadCannotCrossMutation(t *testing.T) {
+	for _, mode := range []string{"cache", "singleflight", "both"} {
+		t.Run(mode, func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			var calls atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/search") {
+					n := calls.Add(1)
+					if n == 1 {
+						close(started)
+						<-release
+					}
+					writeJSON(t, w, 200, SearchResponse{Total: int(n)})
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer srv.Close()
+			defer unblock()
+			var opts []Option
+			if mode != "singleflight" {
+				opts = append(opts, WithQueryCache(10, time.Minute))
+			}
+			if mode != "cache" {
+				opts = append(opts, WithSingleflight(time.Minute))
+			}
+			c := newTestClient(t, srv, opts...)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			type result struct {
+				response *SearchResponse
+				err      error
+			}
+			search := func(done chan<- result) {
+				res, err := c.Search(ctx, "t", "i", SearchRequest{Query: "q"})
+				done <- result{res, err}
+			}
+			old := make(chan result, 1)
+			go search(old)
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal("old search never started")
+			}
+			if _, err := c.AddDocuments(ctx, "t", "i", AddDocumentsRequest{}); err != nil {
+				t.Fatal(err)
+			}
+			fresh := make(chan result, 1)
+			go search(fresh)
+			select {
+			case got := <-fresh:
+				if got.err != nil || got.response.Total != 2 {
+					t.Fatalf("post-mutation search: %+v, %v", got.response, got.err)
+				}
+			case <-ctx.Done():
+				t.Fatal("post-mutation search joined stale in-flight request")
+			}
+			unblock()
+			if got := <-old; got.err != nil || got.response.Total != 1 {
+				t.Fatalf("original read: %+v, %v", got.response, got.err)
+			}
+			res, err := c.Search(ctx, "t", "i", SearchRequest{Query: "q"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Total != 2 || calls.Load() != 2 {
+				t.Fatalf("delayed response replaced fresh cache: %+v, calls=%d", res, calls.Load())
+			}
+		})
+	}
+}
+
+func TestSearchResponse_RerankAppliedPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		present bool
+		applied bool
+	}{
+		{"omitted", `{"results":[],"total":0}`, false, false},
+		{"skipped", `{"results":[],"total":0,"rerank_applied":false}`, true, false},
+		{"applied", `{"results":[],"total":0,"rerank_applied":true}`, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var res SearchResponse
+			if err := json.Unmarshal([]byte(tc.body), &res); err != nil {
+				t.Fatal(err)
+			}
+			if (res.RerankApplied != nil) != tc.present || (tc.present && *res.RerankApplied != tc.applied) {
+				t.Fatalf("rerank presence/value lost: %+v", res)
+			}
+		})
+	}
+}
