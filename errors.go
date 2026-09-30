@@ -42,8 +42,37 @@ var (
 	ErrValidation = errors.New("graphann: validation failed")
 	// ErrNotImplemented is returned for HTTP 501.
 	ErrNotImplemented = errors.New("graphann: not implemented")
+	// ErrUnprocessable is returned for HTTP 422.
+	ErrUnprocessable = errors.New("graphann: unprocessable entity")
+	// ErrInsufficientStorage is returned for HTTP 507, when ingest would
+	// exceed the tenant's storage quota. Retrying does not help until the
+	// quota is raised or data is deleted.
+	ErrInsufficientStorage = errors.New("graphann: insufficient storage")
 	// ErrConfig is returned at construction time for invalid SDK options.
 	ErrConfig = errors.New("graphann: invalid configuration")
+)
+
+// Server error codes carried in APIError.Code. ErrorCodeBadGateway and
+// ErrorCodeUnprocessable are emitted by the server but absent from the
+// OpenAPI enum.
+const (
+	ErrorCodeInternal            = "internal_error"
+	ErrorCodeBadRequest          = "bad_request"
+	ErrorCodeUnauthorized        = "unauthorized"
+	ErrorCodeForbidden           = "forbidden"
+	ErrorCodeNotFound            = "not_found"
+	ErrorCodeConflict            = "conflict"
+	ErrorCodeQuotaExceeded       = "quota_exceeded"
+	ErrorCodeRateLimited         = "rate_limited"
+	ErrorCodeValidation          = "validation_error"
+	ErrorCodeIndexNotReady       = "index_not_ready"
+	ErrorCodeIndexBuilding       = "index_building"
+	ErrorCodeServiceUnavailable  = "service_unavailable"
+	ErrorCodePayloadTooLarge     = "payload_too_large"
+	ErrorCodeInsufficientStorage = "insufficient_storage"
+	ErrorCodeNotImplemented      = "not_implemented"
+	ErrorCodeBadGateway          = "bad_gateway"
+	ErrorCodeUnprocessable       = "unprocessable_entity"
 )
 
 // APIError is the structured error returned by the GraphANN HTTP API.
@@ -128,10 +157,14 @@ func sentinelFor(status int, code string) error {
 		return ErrConflict
 	case 413:
 		return ErrPayloadTooLarge
+	case 422:
+		return ErrUnprocessable
 	case 429:
 		return ErrRateLimited
 	case 501:
 		return ErrNotImplemented
+	case 507:
+		return ErrInsufficientStorage
 	case 503:
 		if code == "index_not_ready" || code == "index_building" {
 			return ErrIndexNotReady
@@ -147,8 +180,12 @@ func sentinelFor(status int, code string) error {
 // errorEnvelope is the JSON shape the server uses for error payloads:
 //
 //	{ "error": { "code": "...", "message": "...", "details": ... } }
+//
+// GET /ready answers 503 with {"status": "not ready", "reason": "..."}
+// instead; Reason carries that text.
 type errorEnvelope struct {
-	Error struct {
+	Reason string `json:"reason"`
+	Error  struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 		Details any    `json:"details,omitempty"`

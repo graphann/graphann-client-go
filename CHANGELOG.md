@@ -4,6 +4,42 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-09-30
+
+### Added
+
+- Client methods for five new server operations: `GetTenantQuota` and
+  `UpdateTenantQuota` (`/v1/tenants/{tid}/quota`), `GetAPIKeyStatus`
+  (`GET /v1/admin/api-key-status`), `ListAllBackups` (`GET /v1/admin/backups`,
+  a keyset-paginated iterator) and `GetBackupStatus`
+  (`GET /v1/admin/backups/status`).
+- New types: `TenantQuotaResponse`, `UpdateTenantQuotaRequest`,
+  `APIKeyStatusResponse`, `APIKeyStatusTenantRow`, `AdminBackupRow`,
+  `AdminBackupList`, `BackupScheduleStatus` and `ListAllBackupsRequest`.
+- `CreateIndexRequest` and `Index` carry `ChunkSize` and `ChunkOverlap`.
+- `AddDocumentsResponse.Warnings`.
+- `SearchRequest.GroupBy` and `MaxPerDoc`, with `SearchGroupByDocument`.
+- `CreateAPIKeyRequest.Role` with the `APIKeyRole*` constants.
+- `RestoreBackupRequest.Name`, and `EmbedSpaceIndexRow.NumChunks`.
+- `IndexStatusResponse` exposes the embed-space fields the server already
+  returned, with `EmbedSpaceState` constants that include `EmbedSpaceEmpty`.
+  `EmbedSpaceAdminResponse.Counts` now holds seven state keys.
+- `ErrInsufficientStorage` (HTTP 507) and `ErrUnprocessable` (HTTP 422)
+  sentinels, and `ErrorCode*` constants for `APIError.Code`.
+- Fields the server already returned or accepted but the SDK dropped:
+  `Index` (`Error`, `LastCompactedAt`, `CreatedBy`, `Metadata`,
+  `VectorsExternal`, `Embedding*`), `LiveStatsResponse` size and rebuild
+  fields, `UpsertResourceRequest` metadata fields, `MultiSearchRequest.MaxResults`,
+  and the `IndexStatusPending` and `IndexStatusDeleted` constants.
+
+### Changed
+
+- Generated types are regenerated from the refreshed `spec.yaml`.
+- `APIError.Message` for `GET /ready` 503 responses now carries the server's
+  `reason` (for example "shutting down") instead of the generic status text.
+- The `CreateAPIKeyRequest.UserID` comment now says the field is required,
+  which matches the server.
+
 ## [0.9.1] - 2026-09-07
 
 ### Fixed

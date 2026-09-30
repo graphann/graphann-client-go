@@ -21,7 +21,7 @@ import (
 )
 
 // Version is the SDK version. Embedded in the User-Agent.
-const Version = "0.9.1"
+const Version = "0.10.0"
 
 // defaultUserAgent is computed once.
 var defaultUserAgent = fmt.Sprintf(
@@ -306,6 +306,9 @@ func decodeAPIError(resp *http.Response, body []byte, requestID string) *APIErro
 	_ = json.Unmarshal(body, &env)
 	code := env.Error.Code
 	msg := env.Error.Message
+	if msg == "" {
+		msg = env.Reason
+	}
 	if msg == "" {
 		msg = http.StatusText(resp.StatusCode)
 	}

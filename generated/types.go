@@ -11,20 +11,21 @@ import (
 
 // Defines values for APIErrorCode.
 const (
-	APIErrorCodeBadRequest         APIErrorCode = "bad_request"
-	APIErrorCodeConflict           APIErrorCode = "conflict"
-	APIErrorCodeForbidden          APIErrorCode = "forbidden"
-	APIErrorCodeIndexBuilding      APIErrorCode = "index_building"
-	APIErrorCodeIndexNotReady      APIErrorCode = "index_not_ready"
-	APIErrorCodeInternalError      APIErrorCode = "internal_error"
-	APIErrorCodeNotFound           APIErrorCode = "not_found"
-	APIErrorCodeNotImplemented     APIErrorCode = "not_implemented"
-	APIErrorCodePayloadTooLarge    APIErrorCode = "payload_too_large"
-	APIErrorCodeQuotaExceeded      APIErrorCode = "quota_exceeded"
-	APIErrorCodeRateLimited        APIErrorCode = "rate_limited"
-	APIErrorCodeServiceUnavailable APIErrorCode = "service_unavailable"
-	APIErrorCodeUnauthorized       APIErrorCode = "unauthorized"
-	APIErrorCodeValidationError    APIErrorCode = "validation_error"
+	APIErrorCodeBadRequest          APIErrorCode = "bad_request"
+	APIErrorCodeConflict            APIErrorCode = "conflict"
+	APIErrorCodeForbidden           APIErrorCode = "forbidden"
+	APIErrorCodeIndexBuilding       APIErrorCode = "index_building"
+	APIErrorCodeIndexNotReady       APIErrorCode = "index_not_ready"
+	APIErrorCodeInsufficientStorage APIErrorCode = "insufficient_storage"
+	APIErrorCodeInternalError       APIErrorCode = "internal_error"
+	APIErrorCodeNotFound            APIErrorCode = "not_found"
+	APIErrorCodeNotImplemented      APIErrorCode = "not_implemented"
+	APIErrorCodePayloadTooLarge     APIErrorCode = "payload_too_large"
+	APIErrorCodeQuotaExceeded       APIErrorCode = "quota_exceeded"
+	APIErrorCodeRateLimited         APIErrorCode = "rate_limited"
+	APIErrorCodeServiceUnavailable  APIErrorCode = "service_unavailable"
+	APIErrorCodeUnauthorized        APIErrorCode = "unauthorized"
+	APIErrorCodeValidationError     APIErrorCode = "validation_error"
 )
 
 // Valid indicates whether the value is a known member of the APIErrorCode enum.
@@ -39,6 +40,8 @@ func (e APIErrorCode) Valid() bool {
 	case APIErrorCodeIndexBuilding:
 		return true
 	case APIErrorCodeIndexNotReady:
+		return true
+	case APIErrorCodeInsufficientStorage:
 		return true
 	case APIErrorCodeInternalError:
 		return true
@@ -177,6 +180,27 @@ func (e Compression) Valid() bool {
 	}
 }
 
+// Defines values for CreateAPIKeyRequestRole.
+const (
+	Admin  CreateAPIKeyRequestRole = "admin"
+	Editor CreateAPIKeyRequestRole = "editor"
+	Viewer CreateAPIKeyRequestRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the CreateAPIKeyRequestRole enum.
+func (e CreateAPIKeyRequestRole) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case Editor:
+		return true
+	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeleteBackupResponseStatus.
 const (
 	DeleteBackupResponseStatusDeleted DeleteBackupResponseStatus = "deleted"
@@ -230,6 +254,7 @@ func (e EmbedSpaceAdminResponsePolicy) Valid() bool {
 
 // Defines values for EmbedSpaceIndexRowState.
 const (
+	EmbedSpaceIndexRowStateEmpty              EmbedSpaceIndexRowState = "empty"
 	EmbedSpaceIndexRowStateExternalAgree      EmbedSpaceIndexRowState = "external_agree"
 	EmbedSpaceIndexRowStateExternalDiverged   EmbedSpaceIndexRowState = "external_diverged"
 	EmbedSpaceIndexRowStateExternalUnverified EmbedSpaceIndexRowState = "external_unverified"
@@ -241,6 +266,8 @@ const (
 // Valid indicates whether the value is a known member of the EmbedSpaceIndexRowState enum.
 func (e EmbedSpaceIndexRowState) Valid() bool {
 	switch e {
+	case EmbedSpaceIndexRowStateEmpty:
+		return true
 	case EmbedSpaceIndexRowStateExternalAgree:
 		return true
 	case EmbedSpaceIndexRowStateExternalDiverged:
@@ -353,6 +380,7 @@ func (e IndexStatusResponseEmbedSpacePolicy) Valid() bool {
 
 // Defines values for IndexStatusResponseEmbedSpaceState.
 const (
+	IndexStatusResponseEmbedSpaceStateEmpty              IndexStatusResponseEmbedSpaceState = "empty"
 	IndexStatusResponseEmbedSpaceStateExternalAgree      IndexStatusResponseEmbedSpaceState = "external_agree"
 	IndexStatusResponseEmbedSpaceStateExternalDiverged   IndexStatusResponseEmbedSpaceState = "external_diverged"
 	IndexStatusResponseEmbedSpaceStateExternalUnverified IndexStatusResponseEmbedSpaceState = "external_unverified"
@@ -364,6 +392,8 @@ const (
 // Valid indicates whether the value is a known member of the IndexStatusResponseEmbedSpaceState enum.
 func (e IndexStatusResponseEmbedSpaceState) Valid() bool {
 	switch e {
+	case IndexStatusResponseEmbedSpaceStateEmpty:
+		return true
 	case IndexStatusResponseEmbedSpaceStateExternalAgree:
 		return true
 	case IndexStatusResponseEmbedSpaceStateExternalDiverged:
@@ -564,6 +594,21 @@ func (e RestoreBackupResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for SearchRequestGroupBy.
+const (
+	SearchRequestGroupByDocument SearchRequestGroupBy = "document"
+)
+
+// Valid indicates whether the value is a known member of the SearchRequestGroupBy enum.
+func (e SearchRequestGroupBy) Valid() bool {
+	switch e {
+	case SearchRequestGroupByDocument:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SwitchEmbeddingModelRequestEmbeddingBackend.
 const (
 	SwitchEmbeddingModelRequestEmbeddingBackendLocalOnnx SwitchEmbeddingModelRequestEmbeddingBackend = "local_onnx"
@@ -758,6 +803,35 @@ type APIKeyListItem struct {
 	UserId     string     `json:"user_id"`
 }
 
+// APIKeyStatusResponse defines model for APIKeyStatusResponse.
+type APIKeyStatusResponse struct {
+	// AdminTokenConfigured Whether the node admin token (--admin-token) is set. Never the token itself.
+	AdminTokenConfigured *bool `json:"admin_token_configured,omitempty"`
+	MetricsPublic        *bool `json:"metrics_public,omitempty"`
+	StrictAuth           *bool `json:"strict_auth,omitempty"`
+
+	// TenantKeyEnforcement False only when GRAPHANN_TENANT_KEY_ENFORCEMENT=off.
+	TenantKeyEnforcement *bool `json:"tenant_key_enforcement,omitempty"`
+
+	// Tenants Scoped to the caller: every tenant for a node admin, only the
+	// caller's own tenant for a tenant-authenticated caller, or
+	// every tenant except keyed ones for an anonymous caller.
+	Tenants *[]APIKeyStatusTenantRow `json:"tenants,omitempty"`
+}
+
+// APIKeyStatusTenantRow defines model for APIKeyStatusTenantRow.
+type APIKeyStatusTenantRow struct {
+	// ActiveKeys Number of active (non-revoked) API keys this tenant holds.
+	ActiveKeys *int `json:"active_keys,omitempty"`
+
+	// Locked Whether the tenant may be addressed only with one of its own
+	// keys (the per-tenant key rule): active_keys > 0 AND the rule's
+	// kill switch (GRAPHANN_TENANT_KEY_ENFORCEMENT=off) is not set.
+	Locked     *bool   `json:"locked,omitempty"`
+	TenantId   *string `json:"tenant_id,omitempty"`
+	TenantName *string `json:"tenant_name,omitempty"`
+}
+
 // AddDocumentsRequest defines model for AddDocumentsRequest.
 type AddDocumentsRequest struct {
 	// Bulk Enables bulk-ingest mode: in addition to deferring the
@@ -799,6 +873,46 @@ type AddDocumentsResponse struct {
 	// supplied every ID.
 	ExternalIds *[]string `json:"external_ids,omitempty"`
 	IndexId     *string   `json:"index_id,omitempty"`
+
+	// Warnings Advisory only -- the request still succeeds and every document is
+	// still ingested. Currently populated only on the precomputed-vector
+	// path (every document carries `vector`) for a document whose text
+	// exceeds the embedder's estimated token budget. The client already
+	// computed the vector for that exact text, so the document is never
+	// rejected -- but any FUTURE re-embed of the stored text (a
+	// text-ingested index's rerank re-embed, or a model switch/reembed)
+	// will silently truncate it at the model's token limit. Chunk
+	// documents before embedding them to avoid this.
+	Warnings *[]string `json:"warnings,omitempty"`
+}
+
+// AdminBackupList Body of `GET /v1/admin/backups`.
+type AdminBackupList struct {
+	Backups []AdminBackupRow `json:"backups"`
+
+	// NextCursor Opaque cursor for the next page. Empty on the last page.
+	NextCursor string `json:"next_cursor"`
+
+	// Total Count of backups matching the filters, before paging.
+	Total int `json:"total"`
+}
+
+// AdminBackupRow One backup row in GET /v1/admin/backups.
+type AdminBackupRow struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id Opaque backup id, also the storage key prefix.
+	Id      string `json:"id"`
+	IndexId string `json:"index_id"`
+
+	// IndexName Empty when the owning index no longer exists.
+	IndexName string `json:"index_name"`
+	NumChunks int    `json:"num_chunks"`
+	TenantId  string `json:"tenant_id"`
+
+	// TenantName Empty when the owning tenant no longer exists.
+	TenantName string `json:"tenant_name"`
+	TotalSize  int64  `json:"total_size"`
 }
 
 // AdminCleanupResponse Body of `POST /v1/admin/cleanup-orphans`. `min_age` and `dry_run` echo
@@ -857,6 +971,50 @@ type BackupMeta struct {
 	IndexId         *string            `json:"index_id,omitempty"`
 	Labels          *map[string]string `json:"labels,omitempty"`
 	TenantId        *string            `json:"tenant_id,omitempty"`
+}
+
+// BackupScheduleStatus Body of `GET /v1/admin/backups/status`. Mirrors
+// internal/backup.ScheduleStatus. `enabled`, `keep`, `runs_ok` and
+// `runs_failed` are always present in the response -- none of the
+// four carries `omitempty` on the Go struct, so they come back
+// zero-valued (`enabled: false`, `keep: 0`, `runs_ok: 0`,
+// `runs_failed: 0`) rather than omitted when no --backup-cron
+// schedule is configured. Every other field (`schedule`,
+// `interval_seconds`, `next_run`, `last_run`, `last_success`,
+// `last_run_ok`) is `omitempty` on the Go side and is absent until
+// the scheduler has actually populated it.
+type BackupScheduleStatus struct {
+	// Enabled True once a scheduler is running (--backup-dir and --backup-cron both set).
+	Enabled bool `json:"enabled"`
+
+	// IntervalSeconds Cadence derived from the cron spec, in seconds.
+	IntervalSeconds *int64 `json:"interval_seconds,omitempty"`
+
+	// Keep Number of backups retained per index after each run.
+	Keep int `json:"keep"`
+
+	// LastRun Timestamp of the most recent run, successful or not.
+	LastRun *time.Time `json:"last_run,omitempty"`
+
+	// LastRunOk Whether the most recent run succeeded.
+	LastRunOk *bool `json:"last_run_ok,omitempty"`
+
+	// LastSuccess Timestamp of the most recent successful run.
+	LastSuccess *time.Time `json:"last_success,omitempty"`
+
+	// NextRun Timestamp of the next scheduled run.
+	NextRun *time.Time `json:"next_run,omitempty"`
+
+	// RunsFailed Total failed runs since the process started.
+	RunsFailed int64 `json:"runs_failed"`
+
+	// RunsOk Total successful runs since the process started.
+	RunsOk int64 `json:"runs_ok"`
+
+	// Schedule The cron spec the scheduler was started with.
+	//
+	// Example: 0 2 * * *
+	Schedule *string `json:"schedule,omitempty"`
 }
 
 // BackupSummary Condensed view returned by list-backups. NOTE: this struct has
@@ -1049,9 +1207,23 @@ type CreateAPIKeyRequest struct {
 	// Name Human-readable label stored alongside the key.
 	Name string `json:"name"`
 
-	// UserId Owning user ID. Must already exist inside the tenant.
+	// Role Role the key carries. Required when `user_id` does not name an
+	// existing user. When it names one, the role must equal that
+	// user's role. Mint an `admin` key first: once a tenant has a key,
+	// only an admin key of that tenant can create or revoke keys.
+	Role *CreateAPIKeyRequestRole `json:"role,omitempty"`
+
+	// UserId Owning user ID (`u_` prefix). Without `role`, it must name an
+	// existing user inside the tenant. With `role`, it may name a new
+	// principal: the key record stores the role.
 	UserId string `json:"user_id"`
 }
+
+// CreateAPIKeyRequestRole Role the key carries. Required when `user_id` does not name an
+// existing user. When it names one, the role must equal that
+// user's role. Mint an `admin` key first: once a tenant has a key,
+// only an admin key of that tenant can create or revoke keys.
+type CreateAPIKeyRequestRole string
 
 // CreateAPIKeyResponse defines model for CreateAPIKeyResponse.
 type CreateAPIKeyResponse struct {
@@ -1083,6 +1255,36 @@ type CreateIndexRequest struct {
 	// `binary`) — those have no rerank step to skip. Defaults to
 	// false. See `docs/COMPRESSION.md` § "Approximate-only mode".
 	Approximate *bool `json:"approximate,omitempty"`
+
+	// ChunkOverlap Optional per-index override of the server-wide chunker overlap
+	// default (50 bytes). Must be `>= 0` and strictly less than
+	// `chunk_size`.
+	//
+	// Validated here only against `chunk_size`, not against the
+	// embedding model's token-limited EFFECTIVE chunk size (see
+	// `chunk_size` above). The chunker separately caps the overlap it
+	// actually uses to at most a quarter of the effective chunk size,
+	// so an overlap that looks valid against a large `chunk_size` can
+	// still be reduced once the model's token budget shrinks the
+	// effective size.
+	ChunkOverlap *int `json:"chunk_overlap,omitempty"`
+
+	// ChunkSize Optional per-index override of the server-wide chunker default
+	// (512 bytes). Bounded to [64, 8192]; must be supplied together
+	// with `chunk_overlap` (both omitted/zero means "use the server
+	// default"). Applied the next time this index's LiveIndex is
+	// opened; does not retroactively rechunk data ingested before the
+	// override was set, and survives restarts and compaction.
+	//
+	// The EFFECTIVE chunk size actually used may be smaller than this
+	// value: it is also capped by the configured embedding model's
+	// token limit (e.g. local_onnx's bundled models cap it around 512
+	// bytes), so no chunk is ever built that the model would silently
+	// truncate. This bound is independent of the [64, 8192] range
+	// checked here — it depends on which embedding model the index
+	// uses — so a chunk_size accepted by this validation can still be
+	// clamped down at chunking time.
+	ChunkSize *int `json:"chunk_size,omitempty"`
 
 	// Compression On-disk compression mode for index embeddings. Determines how
 	// compaction persists per-vector data and consequently the storage
@@ -1208,7 +1410,7 @@ type Document struct {
 
 // EmbedSpaceAdminResponse defines model for EmbedSpaceAdminResponse.
 type EmbedSpaceAdminResponse struct {
-	// Counts Count of indexes per state. Always has all six
+	// Counts Count of indexes per state. Always has all seven
 	// EmbedSpaceState keys present, even at zero, so callers can
 	// distinguish "no indexes in this state" from "this state
 	// doesn't exist". sum(counts.values()) == len(indexes).
@@ -1244,12 +1446,24 @@ type EmbedSpaceIndexRow struct {
 	IndexId          *string `json:"index_id,omitempty"`
 
 	// Loaded Whether this index is currently resident in memory (vs. classified by peeking its on-disk header).
-	Loaded   *bool                    `json:"loaded,omitempty"`
+	Loaded *bool `json:"loaded,omitempty"`
+
+	// NumChunks This index's chunk count. 0 is exactly the condition that
+	// resolves state to "empty".
+	NumChunks *int `json:"num_chunks,omitempty"`
+
+	// State empty means the index holds no vectors (num_chunks == 0), so
+	// there is nothing to compare -- not a risk signal. It takes
+	// precedence over every other state, including a stamped mismatch
+	// or an external state.
 	State    *EmbedSpaceIndexRowState `json:"state,omitempty"`
 	TenantId *string                  `json:"tenant_id,omitempty"`
 }
 
-// EmbedSpaceIndexRowState defines model for EmbedSpaceIndexRow.State.
+// EmbedSpaceIndexRowState empty means the index holds no vectors (num_chunks == 0), so
+// there is nothing to compare -- not a risk signal. It takes
+// precedence over every other state, including a stamped mismatch
+// or an external state.
 type EmbedSpaceIndexRowState string
 
 // ErrorEnvelope defines model for ErrorEnvelope.
@@ -1335,6 +1549,21 @@ type IndexInfo struct {
 	// skips the exact rerank step. See `CreateIndexRequest.approximate`
 	// for the full contract. Always false for non-PQ indexes.
 	Approximate *bool `json:"approximate,omitempty"`
+
+	// ChunkOverlap Per-index chunker overlap override, if set via
+	// `CreateIndexRequest.chunk_overlap`. Absent/zero means the
+	// server default (50 bytes) is used. See
+	// `CreateIndexRequest.chunk_overlap` for how this interacts with
+	// the embedding model's token-capped effective chunk size.
+	ChunkOverlap *int `json:"chunk_overlap,omitempty"`
+
+	// ChunkSize Per-index chunker override, if set via
+	// `CreateIndexRequest.chunk_size`. Absent/zero means the server
+	// default (512 bytes) is used. This is the REQUESTED size; the
+	// effective size used at chunking time is also capped by the
+	// index's embedding model's token limit (see
+	// `CreateIndexRequest.chunk_size`) and may be smaller.
+	ChunkSize *int `json:"chunk_size,omitempty"`
 
 	// Compression On-disk compression mode for index embeddings. Determines how
 	// compaction persists per-vector data and consequently the storage
@@ -1427,7 +1656,10 @@ type IndexStatusResponse struct {
 	// after any per-index allow-list override.
 	EmbedSpacePolicy *IndexStatusResponseEmbedSpacePolicy `json:"embed_space_policy,omitempty"`
 
-	// EmbedSpaceState Embedding-space classification of this index.
+	// EmbedSpaceState Embedding-space classification of this index. empty means the
+	// index holds no vectors (0 chunks), so there is nothing to
+	// compare -- not a risk signal. It takes precedence over every
+	// other state.
 	EmbedSpaceState *IndexStatusResponseEmbedSpaceState `json:"embed_space_state,omitempty"`
 	Error           *string                             `json:"error,omitempty"`
 	IndexId         *string                             `json:"index_id,omitempty"`
@@ -1441,7 +1673,10 @@ type IndexStatusResponse struct {
 // after any per-index allow-list override.
 type IndexStatusResponseEmbedSpacePolicy string
 
-// IndexStatusResponseEmbedSpaceState Embedding-space classification of this index.
+// IndexStatusResponseEmbedSpaceState Embedding-space classification of this index. empty means the
+// index holds no vectors (0 chunks), so there is nothing to
+// compare -- not a risk signal. It takes precedence over every
+// other state.
 type IndexStatusResponseEmbedSpaceState string
 
 // IndexStatusResponseStatus defines model for IndexStatusResponse.Status.
@@ -1787,8 +2022,11 @@ type RebuildGraphResponseRebuilt bool
 
 // RestoreBackupRequest defines model for RestoreBackupRequest.
 type RestoreBackupRequest struct {
-	// DestIndex Destination index within the path tenant. The destination directory must be empty -- restore refuses to overwrite existing data.
+	// DestIndex Must be a new, unused index id -- restore creates it and refuses to overwrite an existing index (index ids are global across tenants).
 	DestIndex string `json:"dest_index"`
+
+	// Name Display name for the restored index. Defaults to "<source name> (restored)" when omitted.
+	Name *string `json:"name,omitempty"`
 }
 
 // RestoreBackupResponse defines model for RestoreBackupResponse.
@@ -1854,6 +2092,20 @@ type SearchRequest struct {
 	EfSearch *int          `json:"ef_search,omitempty"`
 	Filter   *SearchFilter `json:"filter,omitempty"`
 
+	// GroupBy Collapses results so no more than `max_per_doc` chunks from
+	// the same source document appear in the response -- a
+	// document chunked into many pieces can otherwise flood top-k
+	// with near-duplicate chunks and crowd out other relevant
+	// documents. Grouped by each result's own `id` (the document's
+	// client-provided external ID, shared by every chunk of one
+	// document on every ingest path), not by the internal
+	// `document_id` in `metadata`. Only `"document"` is supported.
+	// Unset (the default) is dense-only, byte-identical to the
+	// pre-`group_by` behavior. Requires `max_per_doc` to also be
+	// set. Not currently supported on a sharded index -- returns
+	// 400.
+	GroupBy *SearchRequestGroupBy `json:"group_by,omitempty"`
+
 	// Hybrid Fuses the dense (semantic) results with a BM25 lexical
 	// ranking via Reciprocal Rank Fusion (RRF), so rare-token /
 	// keyword matches surface alongside semantic ones. Applies to
@@ -1865,6 +2117,12 @@ type SearchRequest struct {
 
 	// K Maximum number of results to return.
 	K *int `json:"k,omitempty"`
+
+	// MaxPerDoc Maximum chunks from the same document allowed in the
+	// results. Required (>= 1) when `group_by` is set; an error if
+	// `group_by` is set and this is unset or less than 1. Ignored
+	// (no effect, no validation) when `group_by` is unset.
+	MaxPerDoc *int `json:"max_per_doc,omitempty"`
 
 	// Query Text query for semantic search.
 	Query *string `json:"query,omitempty"`
@@ -1895,6 +2153,20 @@ type SearchRequest struct {
 	// exclusive with `vector` -- set one or the other, never both.
 	VectorB64 *string `json:"vector_b64,omitempty"`
 }
+
+// SearchRequestGroupBy Collapses results so no more than `max_per_doc` chunks from
+// the same source document appear in the response -- a
+// document chunked into many pieces can otherwise flood top-k
+// with near-duplicate chunks and crowd out other relevant
+// documents. Grouped by each result's own `id` (the document's
+// client-provided external ID, shared by every chunk of one
+// document on every ingest path), not by the internal
+// `document_id` in `metadata`. Only `"document"` is supported.
+// Unset (the default) is dense-only, byte-identical to the
+// pre-`group_by` behavior. Requires `max_per_doc` to also be
+// set. Not currently supported on a sharded index -- returns
+// 400.
+type SearchRequestGroupBy string
 
 // SearchResponse defines model for SearchResponse.
 type SearchResponse struct {
@@ -1947,13 +2219,24 @@ type SearchResult struct {
 
 // SearchResult_Metadata Chunk metadata merged with arbitrary user metadata.
 type SearchResult_Metadata struct {
+	// ChunkCount How many candidates for this result's document (grouped
+	// by `id`) appeared in the over-fetched pool the server
+	// examined before applying `max_per_doc` -- not the
+	// document's true total chunk count in the index. Present
+	// only when the request set `group_by`.
+	ChunkCount *int `json:"chunk_count,omitempty"`
+
 	// ChunkIndex Chunk index within the document.
 	ChunkIndex *int `json:"chunk_index,omitempty"`
 
 	// CommitSha Git commit SHA.
 	CommitSha *string `json:"commit_sha,omitempty"`
 
-	// DocumentId Internal document ID.
+	// DocumentId Internal per-batch document counter. NOT a stable or
+	// globally unique document identity -- it is 0 for every
+	// chunk ingested through the precomputed-vector path, and
+	// can repeat across compactions. `group_by` does not use
+	// it; use the result's own `id` to identify a document.
 	DocumentId *int `json:"document_id,omitempty"`
 
 	// FilePath File path within the repository.
@@ -2078,6 +2361,15 @@ type TenantListEntry struct {
 	UpdatedAt *time.Time         `json:"updated_at,omitempty"`
 }
 
+// TenantQuotaResponse defines model for TenantQuotaResponse.
+type TenantQuotaResponse struct {
+	// MaxStorageGb Storage quota in GB. 0 means no quota.
+	MaxStorageGb *int `json:"max_storage_gb,omitempty"`
+
+	// UsedStorageGb Current on-disk usage in GB, refreshed periodically.
+	UsedStorageGb *float32 `json:"used_storage_gb,omitempty"`
+}
+
 // TenantResponse defines model for TenantResponse.
 type TenantResponse struct {
 	CreatedAt *time.Time `json:"created_at,omitempty"`
@@ -2145,6 +2437,11 @@ type UpdateIndexRequestCompression string
 // use the process embedder for local models. Setting this to ""
 // clears the override back to the process-wide embedder.
 type UpdateIndexRequestEmbeddingBackend string
+
+// UpdateTenantQuotaRequest defines model for UpdateTenantQuotaRequest.
+type UpdateTenantQuotaRequest struct {
+	MaxStorageGb int `json:"max_storage_gb"`
+}
 
 // UpsertResourceRequest defines model for UpsertResourceRequest.
 type UpsertResourceRequest struct {
@@ -2234,6 +2531,24 @@ type Unauthorized = ErrorEnvelope
 
 // ValidationError defines model for ValidationError.
 type ValidationError = ErrorEnvelope
+
+// ListAllBackupsParams defines parameters for ListAllBackups.
+type ListAllBackupsParams struct {
+	// TenantId Restrict results to one tenant. Omit to list every tenant. For
+	// an authenticated tenant caller this is effectively forced to
+	// that tenant's own id; naming a different tenant returns an
+	// empty list rather than an error.
+	TenantId *string `form:"tenant_id,omitempty" json:"tenant_id,omitempty"`
+
+	// IndexId Restrict results to one index (applied after tenant_id).
+	IndexId *string `form:"index_id,omitempty" json:"index_id,omitempty"`
+
+	// Limit Maximum rows to return.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque keyset cursor from a previous response's next_cursor.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
 
 // CleanupOrphansParams defines parameters for CleanupOrphans.
 type CleanupOrphansParams struct {
@@ -2352,6 +2667,9 @@ type SearchJSONRequestBody = SearchRequest
 // BatchSearchJSONRequestBody defines body for BatchSearch for application/json ContentType.
 type BatchSearchJSONRequestBody = BatchSearchRequest
 
+// UpdateTenantQuotaJSONRequestBody defines body for UpdateTenantQuota for application/json ContentType.
+type UpdateTenantQuotaJSONRequestBody = UpdateTenantQuotaRequest
+
 // Getter for additional properties for SearchResult_Metadata. Returns the specified
 // element and whether it was found
 func (a SearchResult_Metadata) Get(fieldName string) (value interface{}, found bool) {
@@ -2375,6 +2693,14 @@ func (a *SearchResult_Metadata) UnmarshalJSON(b []byte) error {
 	err := json.Unmarshal(b, &object)
 	if err != nil {
 		return err
+	}
+
+	if raw, found := object["chunk_count"]; found {
+		err = json.Unmarshal(raw, &a.ChunkCount)
+		if err != nil {
+			return fmt.Errorf("error reading 'chunk_count': %w", err)
+		}
+		delete(object, "chunk_count")
 	}
 
 	if raw, found := object["chunk_index"]; found {
@@ -2435,6 +2761,13 @@ func (a *SearchResult_Metadata) UnmarshalJSON(b []byte) error {
 func (a SearchResult_Metadata) MarshalJSON() ([]byte, error) {
 	var err error
 	object := make(map[string]json.RawMessage)
+
+	if a.ChunkCount != nil {
+		object["chunk_count"], err = json.Marshal(a.ChunkCount)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'chunk_count': %w", err)
+		}
+	}
 
 	if a.ChunkIndex != nil {
 		object["chunk_index"], err = json.Marshal(a.ChunkIndex)

@@ -39,9 +39,28 @@ type IndexStatus string
 
 const (
 	IndexStatusEmpty    IndexStatus = "empty"
+	IndexStatusPending  IndexStatus = "pending"
 	IndexStatusBuilding IndexStatus = "building"
 	IndexStatusReady    IndexStatus = "ready"
 	IndexStatusError    IndexStatus = "error"
+	IndexStatusDeleted  IndexStatus = "deleted"
+)
+
+// EmbedSpaceState classifies an index's embedding space against the
+// serving embedder.
+type EmbedSpaceState string
+
+const (
+	EmbedSpaceVerified           EmbedSpaceState = "verified"
+	EmbedSpaceMismatch           EmbedSpaceState = "mismatch"
+	EmbedSpaceUnknown            EmbedSpaceState = "unknown"
+	EmbedSpaceExternalUnverified EmbedSpaceState = "external_unverified"
+	EmbedSpaceExternalAgree      EmbedSpaceState = "external_agree"
+	EmbedSpaceExternalDiverged   EmbedSpaceState = "external_diverged"
+	// EmbedSpaceEmpty means the index holds no vectors, so there is
+	// nothing to compare. It is not a risk signal and outranks every
+	// other state.
+	EmbedSpaceEmpty EmbedSpaceState = "empty"
 )
 
 // Index describes a single index belonging to a tenant.
@@ -61,6 +80,29 @@ type Index struct {
 	Compression string `json:"compression,omitempty"`
 	// Approximate reports whether approximate (HNSW) search is enabled.
 	Approximate bool `json:"approximate,omitempty"`
+	// ChunkSize is the requested per-index chunker size in bytes; zero means
+	// the server default. The effective size can be smaller because the
+	// embedding model's token limit caps it.
+	ChunkSize int `json:"chunk_size,omitempty"`
+	// ChunkOverlap is the requested per-index chunker overlap in bytes; zero
+	// means the server default.
+	ChunkOverlap int `json:"chunk_overlap,omitempty"`
+
+	// Error is the failure reason when Status is "error".
+	Error string `json:"error,omitempty"`
+	// LastCompactedAt is the zero time when the index was never compacted.
+	LastCompactedAt time.Time         `json:"last_compacted_at,omitempty"`
+	CreatedBy       string            `json:"created_by,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	// VectorsExternal reports that the index holds caller-supplied vectors.
+	VectorsExternal bool `json:"vectors_external,omitempty"`
+
+	// Per-index embedding override; empty backend means the process embedder.
+	EmbeddingBackend   string `json:"embedding_backend,omitempty"`
+	EmbeddingModel     string `json:"embedding_model,omitempty"`
+	EmbeddingEndpoint  string `json:"embedding_endpoint,omitempty"`
+	EmbeddingDimension int    `json:"embedding_dimension,omitempty"`
+	EmbeddingAPIKeyEnv string `json:"embedding_api_key_env,omitempty"`
 }
 
 // CreateIndexRequest is the body for POST /v1/tenants/{tid}/indexes.
@@ -74,6 +116,13 @@ type CreateIndexRequest struct {
 	// Approximate, when true, enables approximate (HNSW) search; false uses exact scan.
 	// Nil defers to the server default.
 	Approximate *bool `json:"approximate,omitempty"`
+	// ChunkSize overrides the server chunker size in bytes. The server
+	// accepts [64, 8192] and requires ChunkOverlap alongside it; zero for
+	// both keeps the server default. It does not rechunk existing data.
+	ChunkSize int `json:"chunk_size,omitempty"`
+	// ChunkOverlap overrides the chunker overlap in bytes. It must be >= 0
+	// and strictly less than ChunkSize.
+	ChunkOverlap int `json:"chunk_overlap,omitempty"`
 }
 
 // UpdateIndexRequest is the body for PATCH /v1/tenants/{tid}/indexes/{iid}.
@@ -115,6 +164,16 @@ type IndexStatusResponse struct {
 	IndexID string      `json:"index_id"`
 	Status  IndexStatus `json:"status"`
 	Error   *string     `json:"error,omitempty"`
+
+	// EmbedSpaceState compares the index's embedding space with the serving
+	// embedder's.
+	EmbedSpaceState        EmbedSpaceState `json:"embed_space_state,omitempty"`
+	EmbedFingerprint       string          `json:"embed_fingerprint,omitempty"`
+	ServerEmbedFingerprint string          `json:"server_embed_fingerprint,omitempty"`
+	// EmbedSpacePolicy is "warn", "refuse_search" or "refuse_open".
+	EmbedSpacePolicy    string     `json:"embed_space_policy,omitempty"`
+	EmbedSpaceDetail    string     `json:"embed_space_detail,omitempty"`
+	EmbedSpaceCheckedAt *time.Time `json:"embed_space_checked_at,omitempty"`
 }
 
 // HealthResponse is the body returned by GET /health.
@@ -200,6 +259,11 @@ type AddDocumentsResponse struct {
 	IndexID     string   `json:"index_id"`
 	ChunkIDs    []string `json:"chunk_ids,omitempty"`
 	ExternalIDs []string `json:"external_ids,omitempty"`
+	// Warnings are advisory: the request succeeded and every document was
+	// ingested. The server sets them on the precomputed-vector path when a
+	// document's text exceeds the embedder's token budget, because a later
+	// re-embed would truncate it.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ImportDocumentsRequest is the body for POST .../import.
@@ -373,7 +437,19 @@ type SearchRequest struct {
 	// alternative encoding of the query vector that is cheaper to
 	// decode. Mutually exclusive with Vector; set one or the other.
 	VectorB64 string `json:"vector_b64,omitempty"`
+
+	// GroupBy collapses results per source document; only
+	// SearchGroupByDocument is supported. It requires MaxPerDoc >= 1 and
+	// the server answers 400 on a sharded index.
+	GroupBy string `json:"group_by,omitempty"`
+
+	// MaxPerDoc caps the chunks returned per document when GroupBy is set.
+	// The server ignores it when GroupBy is empty.
+	MaxPerDoc int `json:"max_per_doc,omitempty"`
 }
+
+// SearchGroupByDocument is the only supported SearchRequest.GroupBy value.
+const SearchGroupByDocument = "document"
 
 // SearchResult is one hit in a SearchResponse.
 //
@@ -439,6 +515,17 @@ type LiveStatsResponse struct {
 	IsDirty       bool   `json:"is_dirty,omitempty"`
 	NumChunks     int    `json:"num_chunks,omitempty"`
 	NumDocs       int    `json:"num_docs,omitempty"`
+
+	FrozenChunks          int     `json:"frozen_chunks,omitempty"`
+	BaseBytes             int64   `json:"base_bytes,omitempty"`
+	DeltaBytes            int64   `json:"delta_bytes,omitempty"`
+	EmbeddingSidecarBytes int64   `json:"embedding_sidecar_bytes,omitempty"`
+	RawBytes              int64   `json:"raw_bytes,omitempty"`
+	IndexSizeBytes        int64   `json:"index_size_bytes,omitempty"`
+	CompressionRatio      float64 `json:"compression_ratio,omitempty"`
+	BaseDeletedChunks     int     `json:"base_deleted_chunks,omitempty"`
+	BaseDeletedFraction   float64 `json:"base_deleted_fraction,omitempty"`
+	RebuildRecommended    bool    `json:"rebuild_recommended,omitempty"`
 }
 
 // CompactResponse is the body returned by POST .../compact.
@@ -621,6 +708,15 @@ type DeleteLLMSettingsResponse struct {
 type UpsertResourceRequest struct {
 	Text     string            `json:"text"`
 	Metadata map[string]string `json:"metadata,omitempty"`
+
+	ExternalID  string `json:"external_id,omitempty"`
+	RepoID      string `json:"repo_id,omitempty"`
+	FilePath    string `json:"file_path,omitempty"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
+	SourceType  string `json:"source_type,omitempty"`
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+	Title       string `json:"title,omitempty"`
+	URL         string `json:"url,omitempty"`
 }
 
 // UpsertResourceResponse is the response from PUT .../indexes/{iid}/resources/{resID}.
@@ -662,6 +758,8 @@ type MultiSearchRequest struct {
 	StartTime         int64    `json:"start_time,omitempty"`
 	EndTime           int64    `json:"end_time,omitempty"`
 	DistanceThreshold float32  `json:"distance_threshold,omitempty"`
+	// MaxResults is an alias for K on the server.
+	MaxResults int `json:"max_results,omitempty"`
 }
 
 // MultiSearchResult is one hit in a MultiSearchResponse.
@@ -710,12 +808,26 @@ type SyncDocumentsResponse struct {
 }
 
 // CreateAPIKeyRequest is the body for POST /v1/tenants/{tid}/api-keys.
-// The server reads both fields. UserID is optional; when set, ties the key
-// to a user. Name is the key's human-readable label.
+// UserID is required (the server rejects an empty value). Without Role it
+// must name an existing user in the tenant; with Role it may name a new
+// principal. Name is the key's human-readable label.
 type CreateAPIKeyRequest struct {
 	UserID string `json:"user_id"`
 	Name   string `json:"name"`
+	// Role is one of the APIKeyRole constants. It is required when UserID
+	// names no existing user, and must equal the user's role when it does.
+	// Once a tenant has any key, only an admin key can create or revoke keys.
+	Role APIKeyRole `json:"role,omitempty"`
 }
+
+// APIKeyRole is the role an API key carries.
+type APIKeyRole string
+
+const (
+	APIKeyRoleAdmin  APIKeyRole = "admin"
+	APIKeyRoleEditor APIKeyRole = "editor"
+	APIKeyRoleViewer APIKeyRole = "viewer"
+)
 
 // CreateAPIKeyResponse is the body returned by POST /v1/tenants/{tid}/api-keys.
 // Plaintext is the secret token and is returned EXACTLY ONCE — the server
@@ -741,4 +853,99 @@ type APIKeyListItem struct {
 // ListAPIKeysResponse is the body returned by GET /v1/tenants/{tid}/api-keys.
 type ListAPIKeysResponse struct {
 	APIKeys []APIKeyListItem `json:"api_keys"`
+}
+
+// TenantQuotaResponse is the body of GET and PUT /v1/tenants/{tid}/quota.
+type TenantQuotaResponse struct {
+	// MaxStorageGB is the storage quota in GB; 0 means no quota.
+	MaxStorageGB int `json:"max_storage_gb"`
+	// UsedStorageGB is the on-disk usage in GB, refreshed periodically.
+	UsedStorageGB float64 `json:"used_storage_gb"`
+}
+
+// APIKeyStatusTenantRow is one tenant in an APIKeyStatusResponse.
+type APIKeyStatusTenantRow struct {
+	TenantID   string `json:"tenant_id"`
+	TenantName string `json:"tenant_name"`
+	// ActiveKeys counts the tenant's non-revoked API keys.
+	ActiveKeys int `json:"active_keys"`
+	// Locked reports that the tenant accepts only its own keys.
+	Locked bool `json:"locked"`
+}
+
+// APIKeyStatusResponse is the body of GET /v1/admin/api-key-status. It
+// carries counts and booleans only, never key material.
+type APIKeyStatusResponse struct {
+	// Tenants is scoped to the caller: all tenants for a node admin, only
+	// its own for a tenant-authenticated caller.
+	Tenants    []APIKeyStatusTenantRow `json:"tenants"`
+	StrictAuth bool                    `json:"strict_auth"`
+	// AdminTokenConfigured reports whether a node admin token is set.
+	AdminTokenConfigured bool `json:"admin_token_configured"`
+	MetricsPublic        bool `json:"metrics_public"`
+	// TenantKeyEnforcement is false only when the operator turned the
+	// per-tenant key rule off.
+	TenantKeyEnforcement bool `json:"tenant_key_enforcement"`
+}
+
+// ListAllBackupsRequest filters GET /v1/admin/backups.
+type ListAllBackupsRequest struct {
+	// TenantID restricts results to one tenant. A tenant-authenticated
+	// caller naming another tenant gets an empty list, not an error.
+	TenantID string
+	IndexID  string
+	// Limit is the page size, 1 to 1000; zero uses the server default (200).
+	Limit int
+}
+
+// UpdateTenantQuotaRequest is the body for PUT /v1/tenants/{tid}/quota.
+type UpdateTenantQuotaRequest struct {
+	// MaxStorageGB is the new quota in GB; 0 removes it. The field is always
+	// sent, so 0 reaches the server.
+	MaxStorageGB int `json:"max_storage_gb"`
+}
+
+// AdminBackupRow is one backup in the admin cross-tenant list.
+type AdminBackupRow struct {
+	// ID is the opaque backup id, also the storage key prefix.
+	ID       string `json:"id"`
+	TenantID string `json:"tenant_id"`
+	// TenantName is empty when the owning tenant no longer exists.
+	TenantName string `json:"tenant_name"`
+	IndexID    string `json:"index_id"`
+	// IndexName is empty when the owning index no longer exists.
+	IndexName string    `json:"index_name"`
+	CreatedAt time.Time `json:"created_at"`
+	TotalSize int64     `json:"total_size"`
+	NumChunks int       `json:"num_chunks"`
+}
+
+// AdminBackupList is the body returned by GET /v1/admin/backups.
+type AdminBackupList struct {
+	Backups []AdminBackupRow `json:"backups"`
+	// NextCursor is empty on the last page.
+	NextCursor string `json:"next_cursor"`
+	// Total counts the backups matching the filters, before paging.
+	Total int `json:"total"`
+}
+
+// BackupScheduleStatus is the body returned by GET /v1/admin/backups/status.
+// Enabled, Keep, RunsOK and RunsFailed are always present; the remaining
+// fields stay zero or nil until the scheduler records them.
+type BackupScheduleStatus struct {
+	// Enabled is true once a scheduler runs (--backup-dir and --backup-cron).
+	Enabled bool `json:"enabled"`
+	// Schedule is the cron spec the scheduler started with.
+	Schedule string `json:"schedule,omitempty"`
+	// Keep is the number of backups retained per index after each run.
+	Keep            int        `json:"keep"`
+	IntervalSeconds int64      `json:"interval_seconds,omitempty"`
+	NextRun         *time.Time `json:"next_run,omitempty"`
+	LastRun         *time.Time `json:"last_run,omitempty"`
+	LastSuccess     *time.Time `json:"last_success,omitempty"`
+	// LastRunOK is nil until a run has happened.
+	LastRunOK *bool `json:"last_run_ok,omitempty"`
+	// RunsOK and RunsFailed count runs since the process started.
+	RunsOK     int64 `json:"runs_ok"`
+	RunsFailed int64 `json:"runs_failed"`
 }

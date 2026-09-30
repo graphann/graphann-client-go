@@ -117,7 +117,9 @@ paths:
       summary: Readiness check
       description: |
         Returns whether the server is ready to accept traffic.
-        Returns 503 when the tenant manager is not yet initialized.
+        Returns 503 when the tenant manager is not yet initialized,
+        or 503 with reason "shutting down" while the node drains during
+        a graceful stop.
       tags: [Health]
       responses:
         "200":
@@ -267,6 +269,62 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/tenants/{tenantID}/quota:
+    get:
+      operationId: getTenantQuota
+      summary: Get a tenant's storage quota
+      description: Returns the tenant's storage quota and current on-disk usage. max_storage_gb 0 means no quota.
+      tags: [Tenants]
+      parameters:
+        - $ref: "#/components/parameters/tenantID"
+      responses:
+        "200":
+          description: Quota and usage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantQuotaResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: updateTenantQuota
+      summary: Set a tenant's storage quota
+      description: |
+        Sets the tenant's storage quota in GB. 0 removes the quota. The
+        quota is per tenant and persists in the tenant's meta.json. Ingest
+        over the quota answers 507. Needs the node admin token when the
+        node requires one.
+      tags: [Tenants]
+      parameters:
+        - $ref: "#/components/parameters/tenantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantQuotaRequest"
+      responses:
+        "200":
+          description: Quota updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantQuotaResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/tenants/{tenantID}:
     get:
       operationId: getTenant
@@ -288,6 +346,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     delete:
       operationId: deleteTenant
@@ -319,6 +379,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Indexes
@@ -344,6 +406,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     post:
       operationId: createIndex
@@ -390,6 +454,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}:
     get:
@@ -413,6 +479,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     delete:
       operationId: deleteIndex
@@ -433,6 +501,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     patch:
       operationId: updateIndex
@@ -475,6 +545,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/status:
     get:
@@ -500,6 +572,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Documents
@@ -553,6 +627,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     post:
       operationId: addDocuments
@@ -561,6 +637,14 @@ paths:
         Adds documents to the index incrementally (no full rebuild required).
         Each document may specify either `text` or `content` -- `content`
         is an alias for `text` for clients that prefer that field name.
+
+        `metadata` and `expires_at` are stored in the same per-document
+        sidecar on both the text-ingest path (this description) and the
+        precomputed-vector path (every document carries `vector`) -- they
+        are keyed by the document's `id`, so a document posted without an
+        `id` cannot carry metadata or an expiry. A multi-chunk text
+        document's `metadata`/`expires_at` apply to every chunk the
+        document produces.
 
         Requires an embedding server to be configured.
       tags: [Documents]
@@ -610,6 +694,8 @@ paths:
           $ref: "#/components/responses/QuotaExceeded"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     delete:
       operationId: bulkDeleteDocuments
@@ -650,6 +736,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/documents/by-external-id:
     delete:
@@ -691,6 +779,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/resources/{resourceID}:
     put:
@@ -774,6 +864,8 @@ paths:
                 $ref: "#/components/schemas/GetDocumentResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     delete:
       operationId: deleteDocument
@@ -802,6 +894,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Chunks
@@ -834,6 +928,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     delete:
       operationId: deleteChunk
@@ -870,6 +966,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Search
@@ -926,6 +1024,8 @@ paths:
           $ref: "#/components/responses/QuotaExceeded"
         "503":
           $ref: "#/components/responses/IndexNotReady"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/search/batch:
     post:
@@ -976,6 +1076,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/IndexNotReady"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Index Maintenance
@@ -1044,6 +1146,8 @@ paths:
                   message: compaction already in progress for this index
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/compact-all:
     post:
@@ -1092,6 +1196,10 @@ paths:
                   message: "bulk compaction requires the compaction scheduler; this server was started without it"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/clear:
     post:
@@ -1119,6 +1227,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/live-stats:
     get:
@@ -1141,6 +1251,8 @@ paths:
                 $ref: "#/components/schemas/LiveStatsResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/flush:
     post:
@@ -1176,6 +1288,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/rebuild-graph:
     post:
@@ -1222,6 +1336,8 @@ paths:
                   message: "graph rebuild refused: compaction in progress, retry after it completes"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Batch Import
@@ -1271,6 +1387,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/pending:
     get:
@@ -1295,6 +1413,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     delete:
       operationId: clearPending
@@ -1319,6 +1439,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/indexes/{indexID}/process:
     post:
@@ -1347,6 +1469,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Org -- Documents
@@ -1399,6 +1523,10 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   # ==========================================================================
   # Org -- Search
@@ -1442,6 +1570,10 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   # ==========================================================================
   # Org -- Index Listing
@@ -1466,6 +1598,10 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /v1/orgs/{orgID}/shared/indexes:
     get:
@@ -1486,6 +1622,10 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   # ==========================================================================
   # Embedding Model — hot-swap (async)
@@ -1560,6 +1700,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Jobs — async job tracking
@@ -1646,6 +1788,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/jobs:
     get:
@@ -1689,6 +1833,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Index Maintenance — TTL GC (per index + global)
@@ -1723,6 +1869,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/admin/gc:
     post:
@@ -1831,6 +1979,7 @@ paths:
                   external_unverified: 2
                   external_agree: 1
                   external_diverged: 0
+                  empty: 3
                 indexes:
                   - index_id: idx_abc123
                     tenant_id: t_acme
@@ -1838,7 +1987,142 @@ paths:
                     state: verified
                     embed_fingerprint: fp_a1b2c3
                     detail: ""
+                    num_chunks: 15000
                     checked_at: "2026-08-10T12:00:00Z"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/api-key-status:
+    get:
+      operationId: getAPIKeyStatus
+      summary: Per-tenant API-key status for the admin UI's Security page
+      description: |
+        Reports, per visible tenant, how many active API keys it holds and
+        whether the per-tenant key rule locks it, plus the node's overall
+        security posture (strict auth, whether a node admin token is
+        configured, whether /metrics is public, and whether the per-tenant
+        key rule's kill switch is on). Never exposes key material or
+        hashes -- only counts and a derived boolean.
+
+        Follows the standard node-wide listing scope: a node admin sees
+        every tenant; a tenant-authenticated caller sees only its own row;
+        an anonymous caller (optional/non-strict mode only) sees every
+        tenant except keyed ones. In strict mode, reaching this endpoint
+        at all already requires a node admin token or a valid tenant key.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Per-tenant key status plus the node's security posture.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyStatusResponse"
+              example:
+                tenants:
+                  - tenant_id: t_acme
+                    tenant_name: Acme
+                    active_keys: 3
+                    locked: true
+                strict_auth: true
+                admin_token_configured: true
+                metrics_public: false
+                tenant_key_enforcement: true
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/admin/backups:
+    get:
+      operationId: listAllBackups
+      summary: List backups across all tenants
+      description: |
+        Cross-tenant backup list for the admin UI, with tenant and index
+        display names attached. Admin only. The route exists only when the
+        server runs with --backup-dir.
+
+        Scoping (ruling R23): when the request carries an authenticated
+        tenant (the same signal the per-tenant backup routes use to reject
+        a cross-tenant path), the list and the tenant/index name lookups
+        are restricted to that tenant alone -- a tenant_id naming a
+        different tenant then returns an empty list, not an error, so the
+        caller cannot tell "wrong tenant_id" from "that tenant has no
+        backups". With no tenant in context (the node-operator case),
+        every tenant is listed, unchanged.
+
+        Results are ordered created_at descending, then id descending.
+        Paging is keyset-based: next_cursor stays correct even when the
+        backup it was derived from is deleted before the next page is
+        fetched (no duplicates, no skipped rows).
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: query
+          required: false
+          description: |
+            Restrict results to one tenant. Omit to list every tenant. For
+            an authenticated tenant caller this is effectively forced to
+            that tenant's own id; naming a different tenant returns an
+            empty list rather than an error.
+          schema:
+            type: string
+        - name: index_id
+          in: query
+          required: false
+          description: Restrict results to one index (applied after tenant_id).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum rows to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque keyset cursor from a previous response's next_cursor.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Backups across all tenants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBackupList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/admin/backups/status:
+    get:
+      operationId: getBackupStatus
+      summary: Scheduled backup status
+      description: |
+        Returns the state of the scheduled backup loop on this node. Admin only.
+        The route exists only when the server runs with --backup-dir.
+        enabled is false when no --backup-cron schedule is configured.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Backup schedule status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupScheduleStatus"
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -1990,12 +2274,16 @@ paths:
                   total_size: 4096
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "501":
           $ref: "#/components/responses/BackupDisabled"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/backups:
     get:
@@ -2029,20 +2317,27 @@ paths:
                     NumChunks: 1
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "501":
           $ref: "#/components/responses/BackupDisabled"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/backups/{backupID}/restore:
     post:
       operationId: restoreBackup
       summary: Restore a backup into an index
       description: |
-        Restores the named backup into the destination index given by
-        `dest_index` in the body; the destination tenant is the path
-        tenant. `backupID` is percent-encoded by the client because a
-        backup id contains slashes.
+        Creates a new index from the backup. The index is searchable when
+        the call returns. `dest_index` in the body names the destination
+        index; the destination tenant is the path tenant. `backupID` is
+        percent-encoded by the client because a backup id contains
+        slashes.
       tags: [Backups]
       security:
         - bearerAuth: []
@@ -2068,13 +2363,52 @@ paths:
                 status: restored
                 index_id: idx_restored
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: |
+            The request body is malformed, `dest_index` is missing, or
+            `dest_index` is not a valid new index id: it must start
+            with the `i_` prefix, the same format enforced when
+            creating an index directly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: bad_request
+                  message: Invalid index ID format
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: An index with the requested `dest_index` id already exists (index ids are global across tenants).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: conflict
+        "422":
+          description: |
+            The backup predates stored index settings (made before a
+            manifest carried `meta.index`) and its source index no
+            longer exists, so restore has no settings to recreate the
+            index with. Recreate the source index with the same
+            settings, then restore.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: unprocessable_entity
         "501":
           $ref: "#/components/responses/BackupDisabled"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/backups/{backupID}:
     delete:
@@ -2101,12 +2435,16 @@ paths:
                 status: deleted
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "501":
           $ref: "#/components/responses/BackupDisabled"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # API Keys (tenant-scoped, Admin only)
@@ -2149,6 +2487,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     get:
       operationId: listAPIKeys
@@ -2174,6 +2514,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tenants/{tenantID}/api-keys/{keyID}:
     delete:
@@ -2203,6 +2545,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # LLM Settings (org-scoped)
@@ -2231,6 +2575,10 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
     patch:
       operationId: updateLLMSettings
@@ -2267,6 +2615,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
     delete:
       operationId: deleteLLMSettings
@@ -2294,6 +2646,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
 # ---------------------------------------------------------------------------
 # Components
@@ -2432,7 +2788,12 @@ components:
               message: Index not found
 
     Unauthorized:
-      description: Authentication required.
+      description: |
+        Authentication required. Returned when a presented API key is not
+        valid, and when the addressed tenant has at least one API key but
+        the request carries none (per-tenant key rule; see
+        docs/SECURITY.md). Strict auth returns it for every request
+        without a valid tenant header and key.
       content:
         application/json:
           schema:
@@ -2546,6 +2907,7 @@ components:
             - index_building
             - service_unavailable
             - payload_too_large
+            - insufficient_storage
             - not_implemented
         message:
           type: string
@@ -2593,6 +2955,24 @@ components:
         created_at:
           type: string
           format: date-time
+
+    TenantQuotaResponse:
+      type: object
+      properties:
+        max_storage_gb:
+          type: integer
+          description: Storage quota in GB. 0 means no quota.
+        used_storage_gb:
+          type: number
+          description: Current on-disk usage in GB, refreshed periodically.
+
+    UpdateTenantQuotaRequest:
+      type: object
+      required: [max_storage_gb]
+      properties:
+        max_storage_gb:
+          type: integer
+          minimum: 0
 
     TenantDetailResponse:
       type: object
@@ -2706,6 +3086,38 @@ components:
             non-PQ compression modes (`recompute`, `none`, `scalar`,
             `binary`) — those have no rerank step to skip. Defaults to
             false. See `docs/COMPRESSION.md` § "Approximate-only mode".
+        chunk_size:
+          type: integer
+          description: |
+            Optional per-index override of the server-wide chunker default
+            (512 bytes). Bounded to [64, 8192]; must be supplied together
+            with `chunk_overlap` (both omitted/zero means "use the server
+            default"). Applied the next time this index's LiveIndex is
+            opened; does not retroactively rechunk data ingested before the
+            override was set, and survives restarts and compaction.
+
+            The EFFECTIVE chunk size actually used may be smaller than this
+            value: it is also capped by the configured embedding model's
+            token limit (e.g. local_onnx's bundled models cap it around 512
+            bytes), so no chunk is ever built that the model would silently
+            truncate. This bound is independent of the [64, 8192] range
+            checked here — it depends on which embedding model the index
+            uses — so a chunk_size accepted by this validation can still be
+            clamped down at chunking time.
+        chunk_overlap:
+          type: integer
+          description: |
+            Optional per-index override of the server-wide chunker overlap
+            default (50 bytes). Must be `>= 0` and strictly less than
+            `chunk_size`.
+
+            Validated here only against `chunk_size`, not against the
+            embedding model's token-limited EFFECTIVE chunk size (see
+            `chunk_size` above). The chunker separately caps the overlap it
+            actually uses to at most a quarter of the effective chunk size,
+            so an overlap that looks valid against a large `chunk_size` can
+            still be reduced once the model's token budget shrinks the
+            effective size.
 
     UpdateIndexRequest:
       type: object
@@ -2834,6 +3246,23 @@ components:
             Once set, compacted search paths rank candidates in the
             index's own code space and never re-embed candidate texts for
             reranking.
+        chunk_size:
+          type: integer
+          description: |
+            Per-index chunker override, if set via
+            `CreateIndexRequest.chunk_size`. Absent/zero means the server
+            default (512 bytes) is used. This is the REQUESTED size; the
+            effective size used at chunking time is also capped by the
+            index's embedding model's token limit (see
+            `CreateIndexRequest.chunk_size`) and may be smaller.
+        chunk_overlap:
+          type: integer
+          description: |
+            Per-index chunker overlap override, if set via
+            `CreateIndexRequest.chunk_overlap`. Absent/zero means the
+            server default (50 bytes) is used. See
+            `CreateIndexRequest.chunk_overlap` for how this interacts with
+            the embedding model's token-capped effective chunk size.
         embedding_backend:
           type: string
           description: |
@@ -2877,7 +3306,12 @@ components:
             - external_unverified
             - external_agree
             - external_diverged
-          description: Embedding-space classification of this index.
+            - empty
+          description: |
+            Embedding-space classification of this index. empty means the
+            index holds no vectors (0 chunks), so there is nothing to
+            compare -- not a risk signal. It takes precedence over every
+            other state.
         embed_fingerprint:
           type: string
           description: The index's own stored embedding fingerprint.
@@ -3077,6 +3511,20 @@ components:
             given one; this returns the durable IDs. Absent entirely for
             unsharded ingests and for sharded ingests where the client
             supplied every ID.
+        warnings:
+          type: array
+          items:
+            type: string
+          description: |
+            Advisory only -- the request still succeeds and every document is
+            still ingested. Currently populated only on the precomputed-vector
+            path (every document carries `vector`) for a document whose text
+            exceeds the embedder's estimated token budget. The client already
+            computed the vector for that exact text, so the document is never
+            rejected -- but any FUTURE re-embed of the stored text (a
+            text-ingested index's rerank re-embed, or a model switch/reembed)
+            will silently truncate it at the model's token limit. Chunk
+            documents before embedding them to avoid this.
 
     GetDocumentChunk:
       type: object
@@ -3347,6 +3795,30 @@ components:
             requests. Default false = dense-only. Safe to flip: falls
             back to dense-only results if the lexical index can't be
             built.
+        group_by:
+          type: string
+          enum: ["document"]
+          description: |
+            Collapses results so no more than `max_per_doc` chunks from
+            the same source document appear in the response -- a
+            document chunked into many pieces can otherwise flood top-k
+            with near-duplicate chunks and crowd out other relevant
+            documents. Grouped by each result's own `id` (the document's
+            client-provided external ID, shared by every chunk of one
+            document on every ingest path), not by the internal
+            `document_id` in `metadata`. Only `"document"` is supported.
+            Unset (the default) is dense-only, byte-identical to the
+            pre-`group_by` behavior. Requires `max_per_doc` to also be
+            set. Not currently supported on a sharded index -- returns
+            400.
+        max_per_doc:
+          type: integer
+          minimum: 1
+          description: |
+            Maximum chunks from the same document allowed in the
+            results. Required (>= 1) when `group_by` is set; an error if
+            `group_by` is set and this is unset or less than 1. Ignored
+            (no effect, no validation) when `group_by` is unset.
 
     SearchResult:
       type: object
@@ -3387,10 +3859,23 @@ components:
           properties:
             document_id:
               type: integer
-              description: Internal document ID.
+              description: |
+                Internal per-batch document counter. NOT a stable or
+                globally unique document identity -- it is 0 for every
+                chunk ingested through the precomputed-vector path, and
+                can repeat across compactions. `group_by` does not use
+                it; use the result's own `id` to identify a document.
             chunk_index:
               type: integer
               description: Chunk index within the document.
+            chunk_count:
+              type: integer
+              description: |
+                How many candidates for this result's document (grouped
+                by `id`) appeared in the over-fetched pool the server
+                examined before applying `max_per_doc` -- not the
+                document's true total chunk count in the index. Present
+                only when the request set `group_by`.
             repo_id:
               type: string
               description: Repository ID for RBAC filtering.
@@ -3971,6 +4456,112 @@ components:
           type: boolean
           description: Echoes whether the sweep was a dry run.
 
+    AdminBackupRow:
+      type: object
+      description: One backup row in GET /v1/admin/backups.
+      required:
+        [
+          id,
+          tenant_id,
+          tenant_name,
+          index_id,
+          index_name,
+          created_at,
+          total_size,
+          num_chunks,
+        ]
+      properties:
+        id:
+          type: string
+          description: Opaque backup id, also the storage key prefix.
+        tenant_id:
+          type: string
+        tenant_name:
+          type: string
+          description: Empty when the owning tenant no longer exists.
+        index_id:
+          type: string
+        index_name:
+          type: string
+          description: Empty when the owning index no longer exists.
+        created_at:
+          type: string
+          format: date-time
+        total_size:
+          type: integer
+          format: int64
+        num_chunks:
+          type: integer
+
+    AdminBackupList:
+      type: object
+      description: Body of `GET /v1/admin/backups`.
+      required: [backups, next_cursor, total]
+      properties:
+        backups:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminBackupRow"
+        next_cursor:
+          type: string
+          description: Opaque cursor for the next page. Empty on the last page.
+        total:
+          type: integer
+          description: Count of backups matching the filters, before paging.
+
+    BackupScheduleStatus:
+      type: object
+      description: |
+        Body of `GET /v1/admin/backups/status`. Mirrors
+        internal/backup.ScheduleStatus. `enabled`, `keep`, `runs_ok` and
+        `runs_failed` are always present in the response -- none of the
+        four carries `omitempty` on the Go struct, so they come back
+        zero-valued (`enabled: false`, `keep: 0`, `runs_ok: 0`,
+        `runs_failed: 0`) rather than omitted when no --backup-cron
+        schedule is configured. Every other field (`schedule`,
+        `interval_seconds`, `next_run`, `last_run`, `last_success`,
+        `last_run_ok`) is `omitempty` on the Go side and is absent until
+        the scheduler has actually populated it.
+      required: [enabled, keep, runs_ok, runs_failed]
+      properties:
+        enabled:
+          type: boolean
+          description: True once a scheduler is running (--backup-dir and --backup-cron both set).
+        schedule:
+          type: string
+          description: The cron spec the scheduler was started with.
+          example: "0 2 * * *"
+        keep:
+          type: integer
+          description: Number of backups retained per index after each run.
+        interval_seconds:
+          type: integer
+          format: int64
+          description: Cadence derived from the cron spec, in seconds.
+        next_run:
+          type: string
+          format: date-time
+          description: Timestamp of the next scheduled run.
+        last_run:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent run, successful or not.
+        last_success:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent successful run.
+        last_run_ok:
+          type: boolean
+          description: Whether the most recent run succeeded.
+        runs_ok:
+          type: integer
+          format: int64
+          description: Total successful runs since the process started.
+        runs_failed:
+          type: integer
+          format: int64
+          description: Total failed runs since the process started.
+
     # -- Cluster ----------------------------------------------------------
     ClusterNodeView:
       type: object
@@ -4047,10 +4638,21 @@ components:
       properties:
         user_id:
           type: string
-          description: Owning user ID. Must already exist inside the tenant.
+          description: |
+            Owning user ID (`u_` prefix). Without `role`, it must name an
+            existing user inside the tenant. With `role`, it may name a new
+            principal: the key record stores the role.
         name:
           type: string
           description: Human-readable label stored alongside the key.
+        role:
+          type: string
+          enum: [admin, editor, viewer]
+          description: |
+            Role the key carries. Required when `user_id` does not name an
+            existing user. When it names one, the role must equal that
+            user's role. Mint an `admin` key first: once a tenant has a key,
+            only an admin key of that tenant can create or revoke keys.
 
     CreateAPIKeyResponse:
       type: object
@@ -4333,11 +4935,22 @@ components:
             - external_unverified
             - external_agree
             - external_diverged
+            - empty
+          description: |
+            empty means the index holds no vectors (num_chunks == 0), so
+            there is nothing to compare -- not a risk signal. It takes
+            precedence over every other state, including a stamped mismatch
+            or an external state.
         embed_fingerprint:
           type: string
           description: The index's own stored embedding fingerprint.
         detail:
           type: string
+        num_chunks:
+          type: integer
+          description: |
+            This index's chunk count. 0 is exactly the condition that
+            resolves state to "empty".
         checked_at:
           type: string
           format: date-time
@@ -4366,7 +4979,7 @@ components:
           additionalProperties:
             type: integer
           description: |
-            Count of indexes per state. Always has all six
+            Count of indexes per state. Always has all seven
             EmbedSpaceState keys present, even at zero, so callers can
             distinguish "no indexes in this state" from "this state
             doesn't exist". sum(counts.values()) == len(indexes).
@@ -4374,6 +4987,46 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/EmbedSpaceIndexRow"
+
+    # -- API key status -----------------------------------------------------
+    APIKeyStatusTenantRow:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+        tenant_name:
+          type: string
+        active_keys:
+          type: integer
+          description: Number of active (non-revoked) API keys this tenant holds.
+        locked:
+          type: boolean
+          description: |
+            Whether the tenant may be addressed only with one of its own
+            keys (the per-tenant key rule): active_keys > 0 AND the rule's
+            kill switch (GRAPHANN_TENANT_KEY_ENFORCEMENT=off) is not set.
+
+    APIKeyStatusResponse:
+      type: object
+      properties:
+        tenants:
+          type: array
+          items:
+            $ref: "#/components/schemas/APIKeyStatusTenantRow"
+          description: |
+            Scoped to the caller: every tenant for a node admin, only the
+            caller's own tenant for a tenant-authenticated caller, or
+            every tenant except keyed ones for an anonymous caller.
+        strict_auth:
+          type: boolean
+        admin_token_configured:
+          type: boolean
+          description: Whether the node admin token (--admin-token) is set. Never the token itself.
+        metrics_public:
+          type: boolean
+        tenant_key_enforcement:
+          type: boolean
+          description: False only when GRAPHANN_TENANT_KEY_ENFORCEMENT=off.
 
     # -- Backups ----------------------------------------------------------------
     BackupChunkInfo:
@@ -4474,7 +5127,10 @@ components:
       properties:
         dest_index:
           type: string
-          description: Destination index within the path tenant. The destination directory must be empty -- restore refuses to overwrite existing data.
+          description: Must be a new, unused index id -- restore creates it and refuses to overwrite an existing index (index ids are global across tenants).
+        name:
+          type: string
+          description: Display name for the restored index. Defaults to "<source name> (restored)" when omitted.
 
     RestoreBackupResponse:
       type: object

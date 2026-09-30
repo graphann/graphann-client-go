@@ -39,3 +39,14 @@ func (c *Client) ListAPIKeys(ctx context.Context, tenantID string) (*ListAPIKeys
 	}
 	return &out, nil
 }
+
+// GetAPIKeyStatus calls GET /v1/admin/api-key-status. It reports per-tenant
+// active key counts and the node's security posture. The response never
+// carries key material or hashes.
+func (c *Client) GetAPIKeyStatus(ctx context.Context) (*APIKeyStatusResponse, error) {
+	var out APIKeyStatusResponse
+	if err := c.do(ctx, "GET", "/v1/admin/api-key-status", nil, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

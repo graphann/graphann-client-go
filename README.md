@@ -4,7 +4,7 @@ Official Go client SDK for the [GraphANN](https://graphann.com) vector
 database.
 
 - Module: `github.com/graphann/graphann-client-go`
-- Version: `v0.9.1`
+- Version: `v0.10.0`
 - License: see [`./LICENSE`](./LICENSE)
 
 The SDK speaks the v1 HTTP API and exposes idiomatic Go types for
@@ -15,7 +15,7 @@ tenant, index, document, search, job, cluster, and settings operations.
 Install the tagged release from GitHub:
 
 ```bash
-go get github.com/graphann/graphann-client-go@v0.9.1
+go get github.com/graphann/graphann-client-go@v0.10.0
 ```
 
 ## 5-line quickstart
@@ -94,6 +94,8 @@ func (c *Client) CreateTenant(ctx context.Context, req CreateTenantRequest) (*Te
 func (c *Client) GetTenant   (ctx context.Context, tenantID string)         (*Tenant, error)
 func (c *Client) ListTenants (ctx context.Context)                          (*ListTenantsResponse, error)
 func (c *Client) DeleteTenant(ctx context.Context, tenantID string)         (*DeleteTenantResponse, error)
+func (c *Client) GetTenantQuota   (ctx context.Context, tenantID string)                                   (*TenantQuotaResponse, error)
+func (c *Client) UpdateTenantQuota(ctx context.Context, tenantID string, req UpdateTenantQuotaRequest)     (*TenantQuotaResponse, error)
 
 // Indexes
 func (c *Client) CreateIndex   (ctx context.Context, tenantID string, req CreateIndexRequest)              (*Index, error)
@@ -146,7 +148,29 @@ func (c *Client) DeleteLLMSettings(ctx context.Context, orgID string)           
 func (c *Client) CreateAPIKey(ctx context.Context, tenantID string, req CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
 func (c *Client) RevokeAPIKey(ctx context.Context, tenantID, keyID string)                    error
 func (c *Client) ListAPIKeys (ctx context.Context, tenantID string)                          (*ListAPIKeysResponse, error)
+func (c *Client) GetAPIKeyStatus(ctx context.Context)                                         (*APIKeyStatusResponse, error)
+
+// Backups (server must run with --backup-dir)
+func (c *Client) CreateBackup (ctx context.Context, tenantID, indexID string)                                       (*CreateBackupResponse, error)
+func (c *Client) ListBackups  (ctx context.Context, tenantID string)                                                (*ListBackupsResponse, error)
+func (c *Client) RestoreBackup(ctx context.Context, tenantID, backupID string, req RestoreBackupRequest)            (*RestoreBackupResponse, error)
+func (c *Client) DeleteBackup (ctx context.Context, tenantID, backupID string)                                      (*DeleteBackupResponse, error)
+func (c *Client) ListAllBackups   (ctx context.Context, req ListAllBackupsRequest)                                  *Iter[AdminBackupRow]
+func (c *Client) GetBackupStatus  (ctx context.Context)                                                             (*BackupScheduleStatus, error)
 ```
+
+`ListAllBackups` and `GetBackupStatus` are admin routes. `ListAllBackups`
+follows the server's keyset `next_cursor`, so you never handle cursors yourself.
+`UpdateTenantQuota` needs the node admin token when the node requires one.
+A quota of 0 removes the limit, and ingest over the quota fails with
+`ErrInsufficientStorage`.
+
+`SearchRequest` accepts `GroupBy: graphann.SearchGroupByDocument` with
+`MaxPerDoc` to cap the chunks returned per document. `CreateIndexRequest`
+accepts `ChunkSize` and `ChunkOverlap` together. `CreateAPIKeyRequest` accepts
+a `Role` (`APIKeyRoleAdmin`, `APIKeyRoleEditor` or `APIKeyRoleViewer`).
+`AddDocumentsResponse.Warnings` lists advisory notices for a request that
+still succeeded.
 
 ## Errors
 
@@ -172,7 +196,9 @@ case err != nil:
 Sentinels: `ErrUnauthorized`, `ErrForbidden`, `ErrNotFound`,
 `ErrConflict`, `ErrPayloadTooLarge`, `ErrRateLimited`,
 `ErrIndexNotReady`, `ErrServer`, `ErrNetwork`, `ErrBadRequest`,
-`ErrValidation`, `ErrNotImplemented`, `ErrConfig`.
+`ErrValidation`, `ErrNotImplemented`, `ErrUnprocessable`,
+`ErrInsufficientStorage`, `ErrConfig`. `ErrInsufficientStorage` (HTTP 507) is
+not retried. The `ErrorCode*` constants name the values of `APIError.Code`.
 
 ## Production knobs
 
@@ -187,7 +213,7 @@ Sentinels: `ErrUnauthorized`, `ErrForbidden`, `ErrNotFound`,
   `io.LimitReader(resp.Body, 50 MiB)` to bound memory usage.
 - **gzip**: request bodies remain plain JSON at every size. The SDK
   requests and decodes gzip-compressed responses.
-- **User-Agent**: `graphann-go/0.9.1 (go1.21+; goos/goarch)` by default.
+- **User-Agent**: `graphann-go/0.10.0 (go1.21+; goos/goarch)` by default.
 - **Singleflight**: opt-in with `WithSingleflight(window)`. Concurrent
   identical search requests are coalesced; the result stays sticky for
   `window` after completion.

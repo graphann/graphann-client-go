@@ -3,6 +3,7 @@ package graphann
 import (
 	"context"
 	"net/url"
+	"strconv"
 )
 
 // backupCollectionPath returns /v1/tenants/{tid}/backups.
@@ -35,8 +36,11 @@ func (c *Client) ListBackups(ctx context.Context, tenantID string) (*ListBackups
 }
 
 // RestoreBackup calls POST /v1/tenants/{tid}/backups/{backupID}/restore.
-// Restores the named backup into req.DestIndex within the path tenant.
-// backupID is percent-encoded because backup IDs contain slashes.
+// Creates a new index named req.DestIndex (a new, unused id; it must start
+// with "i_") in the path tenant. req.Name sets its display name and
+// defaults to "<source name> (restored)". Errors: ErrConflict when the id
+// exists, ErrUnprocessable when a pre-settings backup's source index is
+// gone. backupID is percent-encoded because backup IDs contain slashes.
 func (c *Client) RestoreBackup(ctx context.Context, tenantID, backupID string, req RestoreBackupRequest) (*RestoreBackupResponse, error) {
 	path := backupCollectionPath(tenantID) + "/" + url.PathEscape(backupID) + "/restore"
 	var out RestoreBackupResponse
@@ -52,6 +56,46 @@ func (c *Client) DeleteBackup(ctx context.Context, tenantID, backupID string) (*
 	path := backupCollectionPath(tenantID) + "/" + url.PathEscape(backupID)
 	var out DeleteBackupResponse
 	if err := c.do(ctx, "DELETE", path, nil, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListAllBackups returns an iterator over GET /v1/admin/backups, the
+// admin cross-tenant backup list ordered newest first. The iterator follows
+// the server's keyset next_cursor, so deleting a backup between pages
+// causes no duplicates or skipped rows. Like the other backup routes it
+// exists only when the server runs with --backup-dir.
+func (c *Client) ListAllBackups(ctx context.Context, req ListAllBackupsRequest) *Iter[AdminBackupRow] {
+	fetch := func(ctx context.Context, cursor string) ([]AdminBackupRow, string, error) {
+		q := url.Values{}
+		if req.TenantID != "" {
+			q.Set("tenant_id", req.TenantID)
+		}
+		if req.IndexID != "" {
+			q.Set("index_id", req.IndexID)
+		}
+		if req.Limit > 0 {
+			q.Set("limit", strconv.Itoa(req.Limit))
+		}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		var out AdminBackupList
+		if err := c.do(ctx, "GET", "/v1/admin/backups", nil, &out, &requestOpts{query: q}); err != nil {
+			return nil, "", err
+		}
+		return out.Backups, out.NextCursor, nil
+	}
+	return newIter[AdminBackupRow](fetch)
+}
+
+// GetBackupStatus calls GET /v1/admin/backups/status. Enabled is false
+// when no --backup-cron schedule is configured; the time fields stay nil
+// until the scheduler has recorded them.
+func (c *Client) GetBackupStatus(ctx context.Context) (*BackupScheduleStatus, error) {
+	var out BackupScheduleStatus
+	if err := c.do(ctx, "GET", "/v1/admin/backups/status", nil, &out, nil); err != nil {
 		return nil, err
 	}
 	return &out, nil

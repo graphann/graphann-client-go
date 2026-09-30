@@ -44,3 +44,30 @@ func (c *Client) DeleteTenant(ctx context.Context, tenantID string) (*DeleteTena
 	}
 	return &out, nil
 }
+
+// tenantQuotaPath returns /v1/tenants/{tenantID}/quota.
+func tenantQuotaPath(tenantID string) string {
+	return "/v1/tenants/" + url.PathEscape(tenantID) + "/quota"
+}
+
+// GetTenantQuota calls GET /v1/tenants/{tenantID}/quota. MaxStorageGB 0
+// means the tenant has no quota.
+func (c *Client) GetTenantQuota(ctx context.Context, tenantID string) (*TenantQuotaResponse, error) {
+	var out TenantQuotaResponse
+	if err := c.do(ctx, "GET", tenantQuotaPath(tenantID), nil, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateTenantQuota calls PUT /v1/tenants/{tenantID}/quota. A
+// MaxStorageGB of 0 removes the quota; ingest over the quota fails with
+// ErrInsufficientStorage. It needs the node admin token when the node
+// requires one, otherwise it returns ErrForbidden.
+func (c *Client) UpdateTenantQuota(ctx context.Context, tenantID string, req UpdateTenantQuotaRequest) (*TenantQuotaResponse, error) {
+	var out TenantQuotaResponse
+	if err := c.do(ctx, "PUT", tenantQuotaPath(tenantID), req, &out, nil); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
