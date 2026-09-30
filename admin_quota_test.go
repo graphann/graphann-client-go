@@ -256,6 +256,55 @@ func TestListAllBackups_ErrorSurfaces(t *testing.T) {
 	}
 }
 
+func TestListAllBackupsPage_ReturnsTotalAndCursor(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"GET /v1/admin/backups": func(w http.ResponseWriter, r *http.Request) {
+			queries = append(queries, r.URL.RawQuery)
+			if r.URL.Query().Get("cursor") == "cur1" {
+				writeJSON(t, w, 200, AdminBackupList{Backups: []AdminBackupRow{{ID: "b1"}}, Total: 2})
+				return
+			}
+			writeJSON(t, w, 200, AdminBackupList{Backups: []AdminBackupRow{{ID: "b2"}}, NextCursor: "cur1", Total: 2})
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	req := ListAllBackupsRequest{TenantID: "t_1", Limit: 1}
+
+	first, err := c.ListAllBackupsPage(context.Background(), req, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first.Backups) != 1 || first.Backups[0].ID != "b2" || first.NextCursor != "cur1" || first.Total != 2 {
+		t.Fatalf("first page: %+v", first)
+	}
+	last, err := c.ListAllBackupsPage(context.Background(), req, first.NextCursor)
+	if err != nil {
+		t.Fatalf("last page: %v", err)
+	}
+	if len(last.Backups) != 1 || last.Backups[0].ID != "b1" || last.NextCursor != "" || last.Total != 2 {
+		t.Fatalf("last page: %+v", last)
+	}
+	want := []string{"limit=1&tenant_id=t_1", "cursor=cur1&limit=1&tenant_id=t_1"}
+	if !reflect.DeepEqual(queries, want) {
+		t.Errorf("queries: %v, want %v", queries, want)
+	}
+}
+
+func TestListAllBackupsPage_ErrorSurfaces(t *testing.T) {
+	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
+		"GET /v1/admin/backups": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, 403, errBody("forbidden", "admin only"))
+		},
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	if _, err := c.ListAllBackupsPage(context.Background(), ListAllBackupsRequest{}, ""); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+}
+
 func TestGetBackupStatus_Disabled(t *testing.T) {
 	srv := httptest.NewServer(newMockHandler(map[string]http.HandlerFunc{
 		"GET /v1/admin/backups/status": func(w http.ResponseWriter, r *http.Request) {

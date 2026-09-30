@@ -68,26 +68,38 @@ func (c *Client) DeleteBackup(ctx context.Context, tenantID, backupID string) (*
 // exists only when the server runs with --backup-dir.
 func (c *Client) ListAllBackups(ctx context.Context, req ListAllBackupsRequest) *Iter[AdminBackupRow] {
 	fetch := func(ctx context.Context, cursor string) ([]AdminBackupRow, string, error) {
-		q := url.Values{}
-		if req.TenantID != "" {
-			q.Set("tenant_id", req.TenantID)
-		}
-		if req.IndexID != "" {
-			q.Set("index_id", req.IndexID)
-		}
-		if req.Limit > 0 {
-			q.Set("limit", strconv.Itoa(req.Limit))
-		}
-		if cursor != "" {
-			q.Set("cursor", cursor)
-		}
-		var out AdminBackupList
-		if err := c.do(ctx, "GET", "/v1/admin/backups", nil, &out, &requestOpts{query: q}); err != nil {
+		out, err := c.ListAllBackupsPage(ctx, req, cursor)
+		if err != nil {
 			return nil, "", err
 		}
 		return out.Backups, out.NextCursor, nil
 	}
 	return newIter[AdminBackupRow](fetch)
+}
+
+// ListAllBackupsPage fetches one page of GET /v1/admin/backups. An empty
+// cursor requests the first page; pass the previous page's NextCursor for
+// the next one. The result's Total counts every backup matching the filters,
+// which the iterator does not expose.
+func (c *Client) ListAllBackupsPage(ctx context.Context, req ListAllBackupsRequest, cursor string) (*AdminBackupList, error) {
+	q := url.Values{}
+	if req.TenantID != "" {
+		q.Set("tenant_id", req.TenantID)
+	}
+	if req.IndexID != "" {
+		q.Set("index_id", req.IndexID)
+	}
+	if req.Limit > 0 {
+		q.Set("limit", strconv.Itoa(req.Limit))
+	}
+	if cursor != "" {
+		q.Set("cursor", cursor)
+	}
+	var out AdminBackupList
+	if err := c.do(ctx, "GET", "/v1/admin/backups", nil, &out, &requestOpts{query: q}); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetBackupStatus calls GET /v1/admin/backups/status. Enabled is false

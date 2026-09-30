@@ -21,7 +21,7 @@ import (
 )
 
 // Version is the SDK version. Embedded in the User-Agent.
-const Version = "0.10.0"
+const Version = "0.10.1"
 
 // defaultUserAgent is computed once.
 var defaultUserAgent = fmt.Sprintf(

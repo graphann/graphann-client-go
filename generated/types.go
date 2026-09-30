@@ -11,6 +11,7 @@ import (
 
 // Defines values for APIErrorCode.
 const (
+	APIErrorCodeBadGateway          APIErrorCode = "bad_gateway"
 	APIErrorCodeBadRequest          APIErrorCode = "bad_request"
 	APIErrorCodeConflict            APIErrorCode = "conflict"
 	APIErrorCodeForbidden           APIErrorCode = "forbidden"
@@ -25,12 +26,15 @@ const (
 	APIErrorCodeRateLimited         APIErrorCode = "rate_limited"
 	APIErrorCodeServiceUnavailable  APIErrorCode = "service_unavailable"
 	APIErrorCodeUnauthorized        APIErrorCode = "unauthorized"
+	APIErrorCodeUnprocessableEntity APIErrorCode = "unprocessable_entity"
 	APIErrorCodeValidationError     APIErrorCode = "validation_error"
 )
 
 // Valid indicates whether the value is a known member of the APIErrorCode enum.
 func (e APIErrorCode) Valid() bool {
 	switch e {
+	case APIErrorCodeBadGateway:
+		return true
 	case APIErrorCodeBadRequest:
 		return true
 	case APIErrorCodeConflict:
@@ -58,6 +62,8 @@ func (e APIErrorCode) Valid() bool {
 	case APIErrorCodeServiceUnavailable:
 		return true
 	case APIErrorCodeUnauthorized:
+		return true
+	case APIErrorCodeUnprocessableEntity:
 		return true
 	case APIErrorCodeValidationError:
 		return true
@@ -806,30 +812,30 @@ type APIKeyListItem struct {
 // APIKeyStatusResponse defines model for APIKeyStatusResponse.
 type APIKeyStatusResponse struct {
 	// AdminTokenConfigured Whether the node admin token (--admin-token) is set. Never the token itself.
-	AdminTokenConfigured *bool `json:"admin_token_configured,omitempty"`
-	MetricsPublic        *bool `json:"metrics_public,omitempty"`
-	StrictAuth           *bool `json:"strict_auth,omitempty"`
+	AdminTokenConfigured bool `json:"admin_token_configured"`
+	MetricsPublic        bool `json:"metrics_public"`
+	StrictAuth           bool `json:"strict_auth"`
 
 	// TenantKeyEnforcement False only when GRAPHANN_TENANT_KEY_ENFORCEMENT=off.
-	TenantKeyEnforcement *bool `json:"tenant_key_enforcement,omitempty"`
+	TenantKeyEnforcement bool `json:"tenant_key_enforcement"`
 
 	// Tenants Scoped to the caller: every tenant for a node admin, only the
 	// caller's own tenant for a tenant-authenticated caller, or
 	// every tenant except keyed ones for an anonymous caller.
-	Tenants *[]APIKeyStatusTenantRow `json:"tenants,omitempty"`
+	Tenants []APIKeyStatusTenantRow `json:"tenants"`
 }
 
 // APIKeyStatusTenantRow defines model for APIKeyStatusTenantRow.
 type APIKeyStatusTenantRow struct {
 	// ActiveKeys Number of active (non-revoked) API keys this tenant holds.
-	ActiveKeys *int `json:"active_keys,omitempty"`
+	ActiveKeys int `json:"active_keys"`
 
 	// Locked Whether the tenant may be addressed only with one of its own
 	// keys (the per-tenant key rule): active_keys > 0 AND the rule's
 	// kill switch (GRAPHANN_TENANT_KEY_ENFORCEMENT=off) is not set.
-	Locked     *bool   `json:"locked,omitempty"`
-	TenantId   *string `json:"tenant_id,omitempty"`
-	TenantName *string `json:"tenant_name,omitempty"`
+	Locked     bool   `json:"locked"`
+	TenantId   string `json:"tenant_id"`
+	TenantName string `json:"tenant_name"`
 }
 
 // AddDocumentsRequest defines model for AddDocumentsRequest.
@@ -2364,10 +2370,10 @@ type TenantListEntry struct {
 // TenantQuotaResponse defines model for TenantQuotaResponse.
 type TenantQuotaResponse struct {
 	// MaxStorageGb Storage quota in GB. 0 means no quota.
-	MaxStorageGb *int `json:"max_storage_gb,omitempty"`
+	MaxStorageGb int `json:"max_storage_gb"`
 
 	// UsedStorageGb Current on-disk usage in GB, refreshed periodically.
-	UsedStorageGb *float32 `json:"used_storage_gb,omitempty"`
+	UsedStorageGb float32 `json:"used_storage_gb"`
 }
 
 // TenantResponse defines model for TenantResponse.

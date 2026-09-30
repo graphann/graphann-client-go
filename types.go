@@ -38,7 +38,6 @@ type DeleteTenantResponse struct {
 type IndexStatus string
 
 const (
-	IndexStatusEmpty    IndexStatus = "empty"
 	IndexStatusPending  IndexStatus = "pending"
 	IndexStatusBuilding IndexStatus = "building"
 	IndexStatusReady    IndexStatus = "ready"

@@ -52,9 +52,8 @@ var (
 	ErrConfig = errors.New("graphann: invalid configuration")
 )
 
-// Server error codes carried in APIError.Code. ErrorCodeBadGateway and
-// ErrorCodeUnprocessable are emitted by the server but absent from the
-// OpenAPI enum.
+// Server error codes carried in APIError.Code. They mirror the OpenAPI
+// APIError.code enum exactly; TestErrorCodesMatchSpecEnum enforces it.
 const (
 	ErrorCodeInternal            = "internal_error"
 	ErrorCodeBadRequest          = "bad_request"

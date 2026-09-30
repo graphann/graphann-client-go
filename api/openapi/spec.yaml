@@ -2909,6 +2909,8 @@ components:
             - payload_too_large
             - insufficient_storage
             - not_implemented
+            - bad_gateway
+            - unprocessable_entity
         message:
           type: string
           description: Human-readable error message.
@@ -2958,6 +2960,7 @@ components:
 
     TenantQuotaResponse:
       type: object
+      required: [max_storage_gb, used_storage_gb]
       properties:
         max_storage_gb:
           type: integer
@@ -4991,6 +4994,7 @@ components:
     # -- API key status -----------------------------------------------------
     APIKeyStatusTenantRow:
       type: object
+      required: [tenant_id, tenant_name, active_keys, locked]
       properties:
         tenant_id:
           type: string
@@ -5008,6 +5012,7 @@ components:
 
     APIKeyStatusResponse:
       type: object
+      required: [tenants, strict_auth, admin_token_configured, metrics_public, tenant_key_enforcement]
       properties:
         tenants:
           type: array

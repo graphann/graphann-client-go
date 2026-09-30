@@ -5,12 +5,14 @@ names and signatures from this package (`package graphann`). Import path:
 `github.com/graphann/graphann-client-go`. Package name in code: `graphann`.
 
 All methods take a `context.Context` first and return `(*T, error)` (or just
-`error` for `DeleteIndex` / `RevokeAPIKey`).
+`error` for `DeleteIndex` / `RevokeAPIKey`). List methods such as
+`ListDocuments`, `ListJobs` and `ListAllBackups` return an `*Iter[T]`;
+`ListAllBackupsPage` returns one page with its `Total` and `NextCursor`.
 
 ## Install
 
 Install the GitHub release with
-`go get github.com/graphann/graphann-client-go@v0.10.0`;
+`go get github.com/graphann/graphann-client-go@v0.10.1`;
 see [README installation](README.md#install).
 
 ## Client construction + auth
@@ -157,8 +159,9 @@ Admin-only endpoints.
 
 ```go
 created, err := c.CreateAPIKey(ctx, tnt.ID, graphann.CreateAPIKeyRequest{
-    UserID: "u_1", // optional; "" allowed
+    UserID: "u_1", // required; must name an existing user unless Role is set
     Name:   "ci-runner",
+    Role:   graphann.APIKeyRoleAdmin, // required when UserID names no existing user
 })
 // created.ID, created.Name, created.UserID, created.Plaintext, created.CreatedAt
 secret := created.Plaintext // store NOW — not recoverable later
@@ -198,9 +201,11 @@ if errors.As(err, &apiErr) {
 }
 ```
 
-Sentinels: `ErrUnauthorized` (401), `ErrNotFound` (404), `ErrConflict` (409),
-`ErrCompactInProgress` (409 on compact, also matches `ErrConflict`),
-`ErrRateLimited` (429), `ErrBadRequest` (400), `ErrValidation`.
+Sentinels: `ErrUnauthorized` (401), `ErrForbidden` (403), `ErrNotFound` (404),
+`ErrConflict` (409), `ErrCompactInProgress` (409 on compact, also matches
+`ErrConflict`), `ErrRateLimited` (429), `ErrBadRequest` (400), `ErrValidation`,
+`ErrUnprocessable` (422), `ErrInsufficientStorage` (507). `APIError.Code`
+values have matching `ErrorCode*` constants.
 
 ## Key gotchas
 

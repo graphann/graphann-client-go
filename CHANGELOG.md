@@ -4,6 +4,29 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-09-30
+
+### Added
+
+- `ListAllBackupsPage` fetches one page of `GET /v1/admin/backups` and
+  returns `AdminBackupList`, including `Total` and `NextCursor`. The
+  `ListAllBackups` iterator now calls it.
+- A test checks that the `ErrorCode*` constants match the spec's
+  `APIError.code` enum exactly.
+
+### Changed
+
+- **Breaking:** removed the `IndexStatusEmpty` constant. The server never
+  emits `"empty"`; the spec status enum is `pending`, `building`, `ready`,
+  `error` and `deleted`. Use `IndexStatusPending` for a new index.
+- Generated types are regenerated from the refreshed `spec.yaml`:
+  `APIError.code` gains `bad_gateway` and `unprocessable_entity`, and
+  `TenantQuotaResponse`, `APIKeyStatusTenantRow` and `APIKeyStatusResponse`
+  mark their fields required.
+- The README documents `GetEmbedSpaceAdmin`, `CompactAllIndexes` and
+  `ListAllBackupsPage`. AGENTS.md now describes `CreateAPIKeyRequest.UserID`
+  as required, and lists the 403, 422 and 507 sentinels.
+
 ## [0.10.0] - 2026-09-30
 
 ### Added
@@ -55,7 +78,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - This SDK is distributed through tagged GitHub source releases. See
   [installation](README.md#install).
 
-## [0.9.0] - Unreleased
+## [0.9.0] - 2026-08-11
 
 ### Added
 

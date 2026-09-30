@@ -4,7 +4,7 @@ Official Go client SDK for the [GraphANN](https://graphann.com) vector
 database.
 
 - Module: `github.com/graphann/graphann-client-go`
-- Version: `v0.10.0`
+- Version: `v0.10.1`
 - License: see [`./LICENSE`](./LICENSE)
 
 The SDK speaks the v1 HTTP API and exposes idiomatic Go types for
@@ -15,7 +15,7 @@ tenant, index, document, search, job, cluster, and settings operations.
 Install the tagged release from GitHub:
 
 ```bash
-go get github.com/graphann/graphann-client-go@v0.10.0
+go get github.com/graphann/graphann-client-go@v0.10.1
 ```
 
 ## 5-line quickstart
@@ -107,6 +107,8 @@ func (c *Client) GetIndexStatus(ctx context.Context, tenantID, indexID string)  
 func (c *Client) GetLiveStats  (ctx context.Context, tenantID, indexID string)                             (*LiveStatsResponse, error)
 func (c *Client) CompactIndex  (ctx context.Context, tenantID, indexID string)                             (*CompactResponse, error)
 func (c *Client) ClearIndex    (ctx context.Context, tenantID, indexID string)                             (*ClearIndexResponse, error)
+func (c *Client) CompactAllIndexes(ctx context.Context, tenantID string)                                   (*CompactAllResponse, error)
+func (c *Client) GetEmbedSpaceAdmin(ctx context.Context)                                                   (*EmbedSpaceAdminResponse, error)
 
 // Documents
 func (c *Client) AddDocuments         (ctx context.Context, tenantID, indexID string, req AddDocumentsRequest)         (*AddDocumentsResponse, error)
@@ -156,14 +158,26 @@ func (c *Client) ListBackups  (ctx context.Context, tenantID string)            
 func (c *Client) RestoreBackup(ctx context.Context, tenantID, backupID string, req RestoreBackupRequest)            (*RestoreBackupResponse, error)
 func (c *Client) DeleteBackup (ctx context.Context, tenantID, backupID string)                                      (*DeleteBackupResponse, error)
 func (c *Client) ListAllBackups   (ctx context.Context, req ListAllBackupsRequest)                                  *Iter[AdminBackupRow]
+func (c *Client) ListAllBackupsPage(ctx context.Context, req ListAllBackupsRequest, cursor string)                  (*AdminBackupList, error)
 func (c *Client) GetBackupStatus  (ctx context.Context)                                                             (*BackupScheduleStatus, error)
 ```
 
 `ListAllBackups` and `GetBackupStatus` are admin routes. `ListAllBackups`
 follows the server's keyset `next_cursor`, so you never handle cursors yourself.
+`ListAllBackupsPage` fetches a single page instead. It returns `Total` (every
+backup matching the filters) and `NextCursor` (empty on the last page); pass
+an empty cursor for the first page.
 `UpdateTenantQuota` needs the node admin token when the node requires one.
 A quota of 0 removes the limit, and ingest over the quota fails with
 `ErrInsufficientStorage`.
+
+`CompactAllIndexes` queues every index of a tenant for compaction. Indexes
+compact one at a time. The response lists the queued IDs and, in `Skipped`,
+indexes already queued or running. It returns `ErrConflict` when the server
+has no compaction scheduler; track progress with `ListJobs`.
+`GetEmbedSpaceAdmin` is an admin-only, fleet-wide report of embedding-space
+state: one row per index in `Indexes`, per-state totals in `Counts`, and the
+serving embedder's `ServerModel`, `ServerDimension` and `Policy`.
 
 `SearchRequest` accepts `GroupBy: graphann.SearchGroupByDocument` with
 `MaxPerDoc` to cap the chunks returned per document. `CreateIndexRequest`
@@ -213,7 +227,7 @@ not retried. The `ErrorCode*` constants name the values of `APIError.Code`.
   `io.LimitReader(resp.Body, 50 MiB)` to bound memory usage.
 - **gzip**: request bodies remain plain JSON at every size. The SDK
   requests and decodes gzip-compressed responses.
-- **User-Agent**: `graphann-go/0.10.0 (go1.21+; goos/goarch)` by default.
+- **User-Agent**: `graphann-go/0.10.1 (go1.21+; goos/goarch)` by default.
 - **Singleflight**: opt-in with `WithSingleflight(window)`. Concurrent
   identical search requests are coalesced; the result stays sticky for
   `window` after completion.

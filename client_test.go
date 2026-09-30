@@ -714,7 +714,7 @@ func TestCreateIndex_CompressionAndApproximate(t *testing.T) {
 				ID:          "i_new",
 				TenantID:    "t",
 				Name:        "pq-index",
-				Status:      IndexStatusEmpty,
+				Status:      IndexStatusPending,
 				Compression: "pq",
 				Approximate: true,
 			})
