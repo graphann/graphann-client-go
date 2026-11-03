@@ -156,6 +156,9 @@ type UpdateIndexRequest struct {
 type ListIndexesResponse struct {
 	Indexes []Index `json:"indexes"`
 	Total   int     `json:"total"`
+	// OrgID and UserID are set by the org-scoped listings.
+	OrgID  string `json:"org_id,omitempty"`
+	UserID string `json:"user_id,omitempty"`
 }
 
 // IndexStatusResponse is the body returned by GET .../indexes/{iid}/status.
@@ -301,6 +304,7 @@ type ClearPendingResponse struct {
 	IndexID string `json:"index_id"`
 	Cleared int    `json:"cleared,omitempty"`
 	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 
 // BulkDeleteDocumentsRequest is the body for DELETE .../documents.
@@ -445,6 +449,26 @@ type SearchRequest struct {
 	// MaxPerDoc caps the chunks returned per document when GroupBy is set.
 	// The server ignores it when GroupBy is empty.
 	MaxPerDoc int `json:"max_per_doc,omitempty"`
+
+	// RelatedTo is the external ID of a stored document. When set, the
+	// request is a related search: leave Query and Vector empty and the
+	// server ranks the documents most similar to that document.
+	RelatedTo string `json:"related_to,omitempty"`
+
+	// Hops is the length of a related walk (1-3); needs RelatedTo. Zero
+	// uses the server default of 1, the direct related search.
+	Hops int `json:"hops,omitempty"`
+
+	// Fanout is the number of documents each hop expands (1-50). Needs
+	// Hops of 2 or 3. Zero uses the server default of 10.
+	Fanout int `json:"fanout,omitempty"`
+
+	// NovelOnly drops documents a direct related search already returns.
+	NovelOnly bool `json:"novel_only,omitempty"`
+
+	// Diversity (0-1) weights the diverse frontier pick of a walk. Needs
+	// Hops of 2 or 3. Zero expands the Fanout best paths.
+	Diversity float32 `json:"diversity,omitempty"`
 }
 
 // SearchGroupByDocument is the only supported SearchRequest.GroupBy value.
@@ -471,6 +495,22 @@ type SearchResult struct {
 	Score       float32  `json:"score"`
 	RerankScore *float32 `json:"rerank_score,omitempty"`
 	Metadata    any      `json:"metadata,omitempty"`
+
+	// Path is the best path from the source to this document, the source
+	// left out. Set by a related walk of 2 or 3 hops.
+	Path []RelatedHop `json:"path,omitempty"`
+	// Support counts the paths that reach this document. Set by a related walk.
+	Support int `json:"support,omitempty"`
+	// DirectScore is the similarity of this document to the source itself.
+	// Set by a related walk.
+	DirectScore *float32 `json:"direct_score,omitempty"`
+}
+
+// RelatedHop is one step of SearchResult.Path.
+type RelatedHop struct {
+	// ID is the external ID of the document this hop reached.
+	ID    string  `json:"id"`
+	Score float32 `json:"score"`
 }
 
 // SearchResponse is the body returned by .../search endpoints.
@@ -485,6 +525,13 @@ type SearchResult struct {
 type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Total   int            `json:"total"`
+
+	// Exhaustive is set by a related walk: true when no unexplored path can
+	// outscore the k-th result.
+	Exhaustive *bool `json:"exhaustive,omitempty"`
+	// ShardsProbed is the number of shards the query visited; lower than
+	// ShardsTotal when content routing pruned shards.
+	ShardsProbed *int `json:"shards_probed,omitempty"`
 
 	// Partial is true when at least one shard contributed nothing.
 	Partial *bool `json:"partial,omitempty"`
@@ -721,6 +768,7 @@ type UpsertResourceRequest struct {
 // UpsertResourceResponse is the response from PUT .../indexes/{iid}/resources/{resID}.
 type UpsertResourceResponse struct {
 	ResourceID       string `json:"resource_id"`
+	IndexID          string `json:"index_id,omitempty"`
 	ChunksAdded      int    `json:"chunks_added"`
 	ChunksTombstoned int    `json:"chunks_tombstoned"`
 	// Operation is "create" on first upsert, "update" on subsequent ones.

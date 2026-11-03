@@ -21,7 +21,7 @@ import (
 )
 
 // Version is the SDK version. Embedded in the User-Agent.
-const Version = "0.10.1"
+const Version = "0.11.0"
 
 // defaultUserAgent is computed once.
 var defaultUserAgent = fmt.Sprintf(
@@ -39,6 +39,9 @@ const authHeaderTenant = "X-Tenant-ID"
 
 // authHeaderAPIKey is the canonical API key header.
 const authHeaderAPIKey = "X-API-Key" //nolint:gosec // header name, not a credential
+
+// authHeaderAdminToken is the node admin token header.
+const authHeaderAdminToken = "X-GraphANN-Admin-Token" //nolint:gosec // header name, not a credential
 
 // requestIDHeader is echoed by the server.
 const requestIDHeader = "X-Request-ID"
@@ -227,6 +230,9 @@ func (c *Client) attemptOnce(ctx context.Context, method, path string, body any,
 	}
 	if c.cfg.apiKey != "" {
 		req.Header.Set(authHeaderAPIKey, c.cfg.apiKey)
+	}
+	if c.cfg.adminToken != "" {
+		req.Header.Set(authHeaderAdminToken, c.cfg.adminToken)
 	}
 	if opts != nil {
 		for k, vs := range opts.extraHeaders {

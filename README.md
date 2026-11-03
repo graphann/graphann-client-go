@@ -4,7 +4,7 @@ Official Go client SDK for the [GraphANN](https://graphann.com) vector
 database.
 
 - Module: `github.com/graphann/graphann-client-go`
-- Version: `v0.10.1`
+- Version: `v0.11.0`
 - License: see [`./LICENSE`](./LICENSE)
 
 The SDK speaks the v1 HTTP API and exposes idiomatic Go types for
@@ -15,7 +15,7 @@ tenant, index, document, search, job, cluster, and settings operations.
 Install the tagged release from GitHub:
 
 ```bash
-go get github.com/graphann/graphann-client-go@v0.10.1
+go get github.com/graphann/graphann-client-go@v0.11.0
 ```
 
 ## 5-line quickstart
@@ -76,6 +76,7 @@ func NewClient(opts ...Option) (*Client, error)
 type Option func(*config) error
 func WithBaseURL(url string) Option
 func WithAPIKey(tenantID, apiKey string) Option
+func WithAdminToken(token string) Option // X-GraphANN-Admin-Token
 func WithHTTPClient(*http.Client) Option
 func WithTLSConfig(*tls.Config) Option
 func WithRetryPolicy(RetryPolicy) Option
@@ -186,6 +187,14 @@ a `Role` (`APIKeyRoleAdmin`, `APIKeyRoleEditor` or `APIKeyRoleViewer`).
 `AddDocumentsResponse.Warnings` lists advisory notices for a request that
 still succeeded.
 
+Related search is a normal `Search` call with `RelatedTo` (a stored
+document's external ID) and no `Query` or `Vector`. `Hops` (1-3), `Fanout`
+(1-50), `NovelOnly` and `Diversity` (0-1) shape the walk. A walk sets
+`SearchResult.Path`, `Support` and `DirectScore`, and `SearchResponse.Exhaustive`.
+`SearchResponse.ShardsProbed` reports the shards a query visited. In
+`BatchSearch`, each query is a `generated.SearchRequest` and takes the same
+fields, plus `group_by` and `max_per_doc`.
+
 ## Errors
 
 Every operation returns either nil or a wrapped `*APIError`. Use
@@ -227,7 +236,7 @@ not retried. The `ErrorCode*` constants name the values of `APIError.Code`.
   `io.LimitReader(resp.Body, 50 MiB)` to bound memory usage.
 - **gzip**: request bodies remain plain JSON at every size. The SDK
   requests and decodes gzip-compressed responses.
-- **User-Agent**: `graphann-go/0.10.1 (go1.21+; goos/goarch)` by default.
+- **User-Agent**: `graphann-go/0.11.0 (go1.21+; goos/goarch)` by default.
 - **Singleflight**: opt-in with `WithSingleflight(window)`. Concurrent
   identical search requests are coalesced; the result stays sticky for
   `window` after completion.

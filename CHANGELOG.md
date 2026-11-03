@@ -4,6 +4,27 @@ All notable changes to the `graphann` Go SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-11-03
+
+### Added
+
+- Related search: `SearchRequest` gains `RelatedTo`, `Hops`, `Fanout`,
+  `NovelOnly` and `Diversity`. `SearchResult` gains `Path` (`[]RelatedHop`),
+  `Support` and `DirectScore`. `SearchResponse` gains `Exhaustive` and
+  `ShardsProbed`; `BatchSearchResult.Exhaustive` comes from the regenerated
+  types.
+- `WithAdminToken` option sends the node admin token as the
+  `X-GraphANN-Admin-Token` header (the `nodeAdminToken` security scheme).
+- `ListIndexesResponse` gains `OrgID` and `UserID`, `ClearPendingResponse`
+  gains `Message`, and `UpsertResourceResponse` gains `IndexID`, matching the
+  spec.
+- `TestSpecOperationCoverage` calls the SDK method for every operation in the
+  vendored spec and fails on any operation without one.
+
+### Changed
+
+- Generated types are regenerated from the refreshed `spec.yaml`.
+
 ## [0.10.1] - 2026-09-30
 
 ### Added

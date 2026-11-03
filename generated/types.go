@@ -446,13 +446,22 @@ func (e IndexStatusResponseStatus) Valid() bool {
 
 // Defines values for JobKind.
 const (
-	Reembed JobKind = "reembed"
+	Backup     JobKind = "backup"
+	Compaction JobKind = "compaction"
+	Reembed    JobKind = "reembed"
+	Restore    JobKind = "restore"
 )
 
 // Valid indicates whether the value is a known member of the JobKind enum.
 func (e JobKind) Valid() bool {
 	switch e {
+	case Backup:
+		return true
+	case Compaction:
+		return true
 	case Reembed:
+		return true
+	case Restore:
 		return true
 	default:
 		return false
@@ -1051,9 +1060,12 @@ type BatchSearchResponse struct {
 // BatchSearchResult defines model for BatchSearchResult.
 type BatchSearchResult struct {
 	// Error Set instead of `results`/`total` when this one query failed; the rest of the batch is unaffected.
-	Error   *string         `json:"error,omitempty"`
-	Results *[]SearchResult `json:"results,omitempty"`
-	Total   *int            `json:"total,omitempty"`
+	Error *string `json:"error,omitempty"`
+
+	// Exhaustive As `SearchResponse.exhaustive`, for a related walk in the batch.
+	Exhaustive *bool           `json:"exhaustive,omitempty"`
+	Results    *[]SearchResult `json:"results,omitempty"`
+	Total      *int            `json:"total,omitempty"`
 }
 
 // BulkDeleteByExternalIDsRequest defines model for BulkDeleteByExternalIDsRequest.
@@ -1549,7 +1561,9 @@ type ImportDocumentsResponse struct {
 // ImportDocumentsResponseStatus defines model for ImportDocumentsResponse.Status.
 type ImportDocumentsResponseStatus string
 
-// IndexInfo Full index metadata as stored by the tenant manager.
+// IndexInfo Index metadata as stored by the tenant manager. In the org index lists an index found
+// on disk but not in the tenant's catalog is listed with `id`, `path` and `status` only;
+// its counts, dimension and timestamps are zero.
 type IndexInfo struct {
 	// Approximate True when this index is in approximate-only mode: PQ-mode search
 	// skips the exact rerank step. See `CreateIndexRequest.approximate`
@@ -1614,10 +1628,9 @@ type IndexInfo struct {
 	Error          *string `json:"error,omitempty"`
 	Id             *string `json:"id,omitempty"`
 
-	// LastCompactedAt Wall-clock time of the most recent successful compaction.
-	// Absent when the index has never been compacted (either
-	// genuinely fresh, or compacted before this field existed --
-	// callers fall back to `created_at` in that case).
+	// LastCompactedAt Wall-clock time of the most recent successful compaction. Absent when the index
+	// was never compacted (fresh, or compacted before this field existed); callers fall
+	// back to `created_at` in that case.
 	LastCompactedAt *time.Time `json:"last_compacted_at,omitempty"`
 
 	// Metadata Arbitrary operator-set key/value metadata for this index.
@@ -1691,19 +1704,23 @@ type IndexStatusResponseStatus string
 // Job Public view of an async job. The internal `Params.APIKey` is
 // never serialized.
 type Job struct {
-	CompletedAt *time.Time   `json:"completed_at,omitempty"`
-	CreatedAt   *time.Time   `json:"created_at,omitempty"`
-	Error       *string      `json:"error,omitempty"`
-	IndexId     *string      `json:"index_id,omitempty"`
-	JobId       *string      `json:"job_id,omitempty"`
-	Kind        *JobKind     `json:"kind,omitempty"`
-	Progress    *JobProgress `json:"progress,omitempty"`
-	StartedAt   *time.Time   `json:"started_at,omitempty"`
-	Status      *JobStatus   `json:"status,omitempty"`
-	TenantId    *string      `json:"tenant_id,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+	Error       *string    `json:"error,omitempty"`
+	IndexId     *string    `json:"index_id,omitempty"`
+	JobId       *string    `json:"job_id,omitempty"`
+
+	// Kind `reembed` is a hot model switch. `compaction`, `backup` and `restore` are records of
+	// work the schedulers and handlers run, listed so they show in the job views.
+	Kind      *JobKind     `json:"kind,omitempty"`
+	Progress  *JobProgress `json:"progress,omitempty"`
+	StartedAt *time.Time   `json:"started_at,omitempty"`
+	Status    *JobStatus   `json:"status,omitempty"`
+	TenantId  *string      `json:"tenant_id,omitempty"`
 }
 
-// JobKind defines model for Job.Kind.
+// JobKind `reembed` is a hot model switch. `compaction`, `backup` and `restore` are records of
+// work the schedulers and handlers run, listed so they show in the job views.
 type JobKind string
 
 // JobStatus defines model for Job.Status.
@@ -1715,7 +1732,9 @@ type JobListResponse struct {
 
 	// NextCursor Cursor to pass back as `?cursor=` for the next page.
 	NextCursor *string `json:"next_cursor,omitempty"`
-	Total      *int    `json:"total,omitempty"`
+
+	// Total Number of jobs in this page.
+	Total *int `json:"total,omitempty"`
 }
 
 // JobProgress defines model for JobProgress.
@@ -1730,7 +1749,9 @@ type LLMSettings struct {
 	// On write a masked sentinel preserves the existing key.
 	ApiKey *string `json:"api_key,omitempty"`
 
-	// BaseUrl Optional base URL override. SSRF-validated server-side.
+	// BaseUrl Optional base URL override. SSRF-validated server-side: only
+	// public http and https hosts are accepted, whatever the
+	// embedding-endpoint switches say.
 	BaseUrl     *string              `json:"base_url,omitempty"`
 	MaxTokens   *int                 `json:"max_tokens,omitempty"`
 	Model       *string              `json:"model,omitempty"`
@@ -1895,10 +1916,12 @@ type LiveStatsResponse struct {
 	// LiveChunks Active chunks (total - deleted).
 	LiveChunks *int `json:"live_chunks,omitempty"`
 
-	// NumChunks Stored chunk count (from metadata).
+	// NumChunks Chunk count: the live chunk count of a loaded index, or the stored count from
+	// metadata in the fallback.
 	NumChunks *int `json:"num_chunks,omitempty"`
 
-	// NumDocs Stored document count (from metadata).
+	// NumDocs Document count: the live document count of a loaded index, or the stored count
+	// from metadata in the fallback.
 	NumDocs *int `json:"num_docs,omitempty"`
 
 	// RawBytes Uncompressed baseline: what the live chunks' embeddings would weigh as full float32 (live_chunks * dimension * 4). Pair with index_size_bytes for the storage-savings ratio.
@@ -1918,7 +1941,7 @@ type MultiSearchRequest struct {
 	// equal to zero are treated as the default (0.5).
 	DistanceThreshold *float32 `json:"distance_threshold,omitempty"`
 
-	// EfSearch Search expansion factor for HNSW traversal.
+	// EfSearch Search expansion factor for HNSW traversal. 0 or a negative value means 500; above 2000 is clamped to 2000.
 	EfSearch *int `json:"ef_search,omitempty"`
 
 	// EndTime Unix timestamp -- only return results created before this time.
@@ -1927,8 +1950,7 @@ type MultiSearchRequest struct {
 	// IncludeText Include chunk text content in results.
 	IncludeText *bool `json:"include_text,omitempty"`
 
-	// K Maximum results. 0 (default) returns all relevant results with
-	// no limit.
+	// K Maximum results. 0 (default), a negative value or a value above 10000 means 10000.
 	K *int `json:"k,omitempty"`
 
 	// MaxResults Deprecated: use `k` instead.
@@ -2026,6 +2048,15 @@ type RebuildGraphResponse struct {
 // RebuildGraphResponseRebuilt defines model for RebuildGraphResponse.Rebuilt.
 type RebuildGraphResponseRebuilt bool
 
+// RelatedHop defines model for RelatedHop.
+type RelatedHop struct {
+	// Id External ID of the document this hop reached.
+	Id *string `json:"id,omitempty"`
+
+	// Score Similarity of the hop, as a related search scores it.
+	Score *float32 `json:"score,omitempty"`
+}
+
 // RestoreBackupRequest defines model for RestoreBackupRequest.
 type RestoreBackupRequest struct {
 	// DestIndex Must be a new, unused index id -- restore creates it and refuses to overwrite an existing index (index ids are global across tenants).
@@ -2092,11 +2123,23 @@ type SearchRequest struct {
 	// `[k, 1000]`.
 	CandidateK *int `json:"candidate_k,omitempty"`
 
+	// Diversity Weight of the diverse frontier pick of a walk. Each hop expands
+	// the documents with the best path score minus `diversity` times
+	// their largest similarity to the documents it already picked, so
+	// a near-duplicate or a same-template sibling of a picked document
+	// loses to a distinct one. 0 expands the `fanout` best paths. Needs
+	// `hops` of 2 or 3.
+	Diversity *float32 `json:"diversity,omitempty"`
+
 	// EfSearch Per-query HNSW search breadth (candidate list size). 0 (the
 	// default) uses the server default. Clamped to a maximum of
 	// 2000.
-	EfSearch *int          `json:"ef_search,omitempty"`
-	Filter   *SearchFilter `json:"filter,omitempty"`
+	EfSearch *int `json:"ef_search,omitempty"`
+
+	// Fanout Documents each hop of a walk expands, and the length of each hop's
+	// list. Needs `hops` of 2 or 3.
+	Fanout *int          `json:"fanout,omitempty"`
+	Filter *SearchFilter `json:"filter,omitempty"`
 
 	// GroupBy Collapses results so no more than `max_per_doc` chunks from
 	// the same source document appear in the response -- a
@@ -2112,6 +2155,17 @@ type SearchRequest struct {
 	// 400.
 	GroupBy *SearchRequestGroupBy `json:"group_by,omitempty"`
 
+	// Hops Length of a related walk; needs `related_to`. 1 (the default) is
+	// the direct related search. With 2 or 3 the server expands the
+	// `fanout` best documents of each hop, ranks each hop by codes only,
+	// and scores a path as the product of its hop scores, each clamped
+	// to [0, 1]. Results are the documents reached at hop 2 or later,
+	// ranked by their best path, with `path`, `support` and
+	// `direct_score` set, and the response sets `exhaustive`. A walk of
+	// 2 hops runs 1 + `fanout` related searches; one of 3 runs
+	// 1 + 2 * `fanout`.
+	Hops *int `json:"hops,omitempty"`
+
 	// Hybrid Fuses the dense (semantic) results with a BM25 lexical
 	// ranking via Reciprocal Rank Fusion (RRF), so rare-token /
 	// keyword matches surface alongside semantic ones. Applies to
@@ -2121,7 +2175,7 @@ type SearchRequest struct {
 	// built.
 	Hybrid *bool `json:"hybrid,omitempty"`
 
-	// K Maximum number of results to return.
+	// K Maximum number of results to return. 0 or a negative value means 10; above 10000 returns 400.
 	K *int `json:"k,omitempty"`
 
 	// MaxPerDoc Maximum chunks from the same document allowed in the
@@ -2130,13 +2184,33 @@ type SearchRequest struct {
 	// (no effect, no validation) when `group_by` is unset.
 	MaxPerDoc *int `json:"max_per_doc,omitempty"`
 
+	// NovelOnly Drop walk results that the source's own related list of its 50
+	// nearest documents already holds, so only documents reached through
+	// other documents remain. Needs `hops` of 2 or 3.
+	NovelOnly *bool `json:"novel_only,omitempty"`
+
 	// Query Text query for semantic search.
 	Query *string `json:"query,omitempty"`
+
+	// RelatedTo The external ID of a stored document. When set, the request is a
+	// related search from that document instead of a query: the server
+	// sums the vectors it holds for the document's live chunks (stored
+	// vectors for recent writes, decoded codes for compacted rows),
+	// normalises the sum and searches from it. Results hold one entry
+	// per document and never the source itself, whatever its number of
+	// chunks. No text is embedded. Must not be combined with `query`,
+	// `vector`, `hybrid`, `rerank` or `group_by` (400); `k` is at most
+	// 100. `filter` and `ef_search` apply as usual, and `filter` applies
+	// to every hop of a walk. Unknown or deleted document: 404. Not
+	// supported on a sharded index (400). Empty (the default) leaves the
+	// search unchanged. The result cache does not apply.
+	RelatedTo *string `json:"related_to,omitempty"`
 
 	// Rerank When true, rescore the top-`candidate_k` HNSW candidates with the
 	// server-configured cross-encoder reranker and return the top-`rerank_k`
 	// (or top-`k` if `rerank_k` is unset) by reranker score. Silently no-op
-	// when the server has no reranker configured (`--reranker-url` unset),
+	// when the server has no reranker configured (none of `--reranker-url`, `--reranker-builtin` or
+	// `--reranker-onnx-model` set),
 	// so flipping this on a non-rerank-aware deployment is safe.
 	//
 	// Reranking only applies to the text-`query` path. Vector-only
@@ -2179,6 +2253,12 @@ type SearchResponse struct {
 	// DegradedShards Identifiers of degraded shards, when present.
 	DegradedShards *[]string `json:"degraded_shards,omitempty"`
 
+	// Exhaustive Set by a related walk: true when no path the walk left unexplored
+	// can score above its k-th result, so the top k are the best paths
+	// of the whole walk; false when pruning may have hidden a better
+	// path.
+	Exhaustive *bool `json:"exhaustive,omitempty"`
+
 	// Partial Whether one or more shards did not return complete results.
 	Partial *bool `json:"partial,omitempty"`
 
@@ -2189,6 +2269,9 @@ type SearchResponse struct {
 	// ShardsOk Shards that returned complete results.
 	ShardsOk *int `json:"shards_ok,omitempty"`
 
+	// ShardsProbed Shards the query visited. Lower than shards_total when content routing pruned shards that cannot hold a closer result.
+	ShardsProbed *int `json:"shards_probed,omitempty"`
+
 	// ShardsTotal Total shards targeted by a sharded search.
 	ShardsTotal *int `json:"shards_total,omitempty"`
 	Total       *int `json:"total,omitempty"`
@@ -2196,6 +2279,11 @@ type SearchResponse struct {
 
 // SearchResult defines model for SearchResult.
 type SearchResult struct {
+	// DirectScore Set by a related walk; the similarity of this document to the
+	// source itself. A path score well above it marks a relation that a
+	// direct related search would rank low.
+	DirectScore *float32 `json:"direct_score,omitempty"`
+
 	// Id Document identifier. Returns the client-provided external ID
 	// when available, otherwise falls back to the integer chunk index
 	// formatted as a string.
@@ -2203,6 +2291,11 @@ type SearchResult struct {
 
 	// Metadata Chunk metadata merged with arbitrary user metadata.
 	Metadata *SearchResult_Metadata `json:"metadata,omitempty"`
+
+	// Path Set by a related walk (`hops` of 2 or 3): the best path from the
+	// source to this document, the source left out. `score` is then the
+	// product of the path's hop scores.
+	Path *[]RelatedHop `json:"path,omitempty"`
 
 	// RerankScore Cross-encoder relevance score, in the reranker's native
 	// scale (typically roughly -10 to 10 for bge-reranker-v2-m3).
@@ -2220,7 +2313,10 @@ type SearchResult struct {
 	// rely on this single scale across rerank and non-rerank
 	// requests.
 	Score *float32 `json:"score,omitempty"`
-	Text  *string  `json:"text,omitempty"`
+
+	// Support Set by a related walk; the number of paths the walk found to this document.
+	Support *int    `json:"support,omitempty"`
+	Text    *string `json:"text,omitempty"`
 }
 
 // SearchResult_Metadata Chunk metadata merged with arbitrary user metadata.
@@ -2418,7 +2514,8 @@ type UpdateIndexRequest struct {
 	// EmbeddingEndpoint Optional override of the backend base URL. SSRF-validated at
 	// PATCH time (public http/https hosts only) and re-guarded at
 	// connect time, so it cannot point at loopback/RFC1918/metadata
-	// ranges.
+	// ranges, unless the server runs with
+	// `--allow-private-embedding-endpoints`.
 	EmbeddingEndpoint *string `json:"embedding_endpoint,omitempty"`
 
 	// EmbeddingModel Backend model identifier (e.g. "text-embedding-3-small",
@@ -2517,11 +2614,14 @@ type BackupDisabled struct {
 // BadRequest defines model for BadRequest.
 type BadRequest = ErrorEnvelope
 
+// Conflict defines model for Conflict.
+type Conflict = ErrorEnvelope
+
 // Forbidden defines model for Forbidden.
 type Forbidden = ErrorEnvelope
 
-// IndexNotReady defines model for IndexNotReady.
-type IndexNotReady = ErrorEnvelope
+// InsufficientStorage defines model for InsufficientStorage.
+type InsufficientStorage = ErrorEnvelope
 
 // InternalError defines model for InternalError.
 type InternalError = ErrorEnvelope
@@ -2529,8 +2629,17 @@ type InternalError = ErrorEnvelope
 // NotFound defines model for NotFound.
 type NotFound = ErrorEnvelope
 
+// PayloadTooLarge defines model for PayloadTooLarge.
+type PayloadTooLarge = ErrorEnvelope
+
 // QuotaExceeded defines model for QuotaExceeded.
 type QuotaExceeded = ErrorEnvelope
+
+// RateLimited defines model for RateLimited.
+type RateLimited = ErrorEnvelope
+
+// SearchUnavailable defines model for SearchUnavailable.
+type SearchUnavailable = ErrorEnvelope
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = ErrorEnvelope
@@ -2574,10 +2683,13 @@ type ListAllJobsParams struct {
 	// Status Filter to one job status.
 	Status *ListAllJobsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
-	// Cursor Opaque cursor returned in `next_cursor` of a previous page.
+	// Cursor Opaque cursor returned in `next_cursor` of a previous page. A
+	// cursor outside the job-ID character set or longer than 128
+	// characters returns 400.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
-	// Limit Max jobs per page (default 50, hard cap 200).
+	// Limit Jobs per page. A value that is not a positive integer returns
+	// 400. A value above 200 falls back to the default of 50.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -2599,7 +2711,8 @@ type ListDocumentsByPrefixParams struct {
 	// Cursor Opaque pagination cursor from a previous response's `next_cursor`.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
-	// Limit Page size. Defaults to 100, capped at 1000.
+	// Limit Page size. Defaults to 100 and is capped at 1000. A value that
+	// is not a positive integer is ignored and the default applies.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -2615,8 +2728,15 @@ type AddDocumentsParams struct {
 // ListTenantJobsParams defines parameters for ListTenantJobs.
 type ListTenantJobsParams struct {
 	Status *ListTenantJobsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	Cursor *string                     `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit  *int                        `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor returned in `next_cursor` of a previous page. A
+	// cursor outside the job-ID character set or longer than 128
+	// characters returns 400.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Jobs per page. A value that is not a positive integer returns
+	// 400. A value above 200 falls back to the default of 50.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListTenantJobsParamsStatus defines parameters for ListTenantJobs.

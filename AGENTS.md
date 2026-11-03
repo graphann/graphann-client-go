@@ -12,14 +12,15 @@ All methods take a `context.Context` first and return `(*T, error)` (or just
 ## Install
 
 Install the GitHub release with
-`go get github.com/graphann/graphann-client-go@v0.10.1`;
+`go get github.com/graphann/graphann-client-go@v0.11.0`;
 see [README installation](README.md#install).
 
 ## Client construction + auth
 
 `NewClient(opts ...Option)` requires at least `WithBaseURL`. `WithAPIKey`
 sets the tenant ID and API key sent as `X-Tenant-ID` / `X-API-Key` on every
-request. Call `Close()` when done.
+request. `WithAdminToken` sets the node admin token sent as
+`X-GraphANN-Admin-Token` for node-level admin routes. Call `Close()` when done.
 
 ```go
 import (
@@ -100,6 +101,13 @@ res, err := c.AddDocuments(ctx, tnt.ID, idx.ID, graphann.AddDocumentsRequest{
 ```
 
 ## Search (text, vector, rerank, ef_search)
+
+Related search: set `RelatedTo` (a stored document's external ID) and leave
+`Query`/`Vector` empty. `Hops` (1-3), `Fanout` (1-50), `NovelOnly` and
+`Diversity` (0-1) shape a multi-hop walk; results then carry `Path`,
+`Support` and `DirectScore`, and the response carries `Exhaustive`.
+`SearchResponse.ShardsProbed` counts the shards visited. `BatchSearch`
+queries are `generated.SearchRequest` values with the same fields.
 
 Set either `Query` (text) or `Vector` (precomputed embedding). `Rerank` only
 applies to the text `Query` path; `CandidateK` / `RerankK` are effective only

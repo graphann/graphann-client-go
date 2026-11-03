@@ -30,6 +30,7 @@ func (f MetricsHookFunc) ObserveRequest(method, path string, status int, duratio
 type config struct {
 	baseURL    string
 	apiKey     string
+	adminToken string
 	tenantID   string
 	httpClient *http.Client
 	tlsConfig  *tls.Config
@@ -64,6 +65,17 @@ func WithAPIKey(tenantID, apiKey string) Option {
 	return func(c *config) error {
 		c.tenantID = tenantID
 		c.apiKey = apiKey
+		return nil
+	}
+}
+
+// WithAdminToken sets the node admin token sent as the
+// X-GraphANN-Admin-Token header on every request. It authenticates the
+// node-level admin routes (the nodeAdminToken scheme) instead of, or
+// alongside, a tenant API key.
+func WithAdminToken(token string) Option {
+	return func(c *config) error {
+		c.adminToken = token
 		return nil
 	}
 }

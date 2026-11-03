@@ -7,6 +7,9 @@ info:
     'recompute' compression mode), or use scalar/PQ/binary quantized codes
     for a storage-vs-latency trade-off. Up to 95%+ storage savings at scale.
 
+    `info.version` is the server release this document was last checked
+    against.
+
     ## Concepts
 
     - **Tenant** -- top-level isolation boundary that owns indexes.
@@ -19,7 +22,87 @@ info:
     - **Org** -- an organization that groups tenants, users, and shared
       indexes for multi-tenant sync workflows.
 
+    ## Authentication
+
+    By default (no `--strict-auth`) a request without credentials is
+    served anonymously, with three exceptions. A presented API key must be
+    valid, or the response is 401. A tenant that holds at least one API key
+    rejects a request without a key with 401 `API key required`. Repeated
+    wrong keys from one client address return 429 `rate_limited` with
+    `Retry-After: 60`.
+
+    The key travels in `X-API-Key` or in `Authorization: Bearer <key>`,
+    and the tenant in `X-Tenant-ID`. With `--strict-auth` (or
+    `STRICT_AUTH=1`) every request needs `X-Tenant-ID` and a valid key,
+    except `GET /health`, `GET /ready` and GET or HEAD on `/admin` and
+    `/admin/*` (the embedded admin pages). The node admin token
+    (`X-GraphANN-Admin-Token`, set with `--admin-token`) bypasses the
+    tenant checks. Node-level routes need it once `--strict-auth` is on or
+    any tenant holds a key.
+
+    ## Limits and overload
+
+    - A request body is at most 16 MiB; a larger one returns 413
+      `payload_too_large`. Unknown JSON fields return 400.
+    - Requests whose path contains `/search`, or ends in `/import` or
+      `/process`, pass a node-wide concurrency gate. Its size is
+      `GRAPHANN_MAX_INFLIGHT_SEARCH`, or by default the smaller of four per
+      CPU (at least 16) and one per 128 MiB of the memory budget. A request
+      that waits longer than 2 s for a slot returns 503 with the plain-text
+      body `server overloaded` and `Retry-After: 2`.
+    - Under `--strict-auth` one tenant may hold at most half of that gate.
+      A tenant over its share gets 429 `rate_limited` with `Retry-After: 2`.
+
+    ## Response conventions
+
+    - Every response carries `X-Request-ID`. A client may send its own
+      `X-Request-ID`, and the server echoes it.
+    - With `Accept-Encoding: gzip`, a body of 1024 bytes or more is sent
+      gzip-compressed (`Content-Encoding: gzip`, `Vary: Accept-Encoding`).
+    - `Retry-After` (seconds) accompanies 429 and 503 responses where the
+      server knows when to retry.
+
+    ## Operational endpoints
+
+    `GET /metrics` (Prometheus, on unless `--metrics=false`) and
+    `/debug/pprof/*` (on unless `--pprof=false`) need the node admin token
+    once a token is set or any tenant holds a key; `--metrics-public`
+    leaves `/metrics` open. The embedded admin pages are served at
+    `/admin/` unless `--embedded-admin=false`. CORS is on by default with
+    `Access-Control-Allow-Origin: *`; `--cors-allow-origin` (repeatable)
+    restricts it to the listed origins and `--cors=false` removes it.
+    `--tls-cert` and `--tls-key` serve HTTPS on the same port. These
+    routes are operator surfaces and are not described below.
+
+    ## Cluster mode
+
+    With `--raft`, a write sent to a follower is proxied to the leader.
+    Reads and `POST .../search` are served locally. A follower with no
+    leader, or with a leader whose address it cannot resolve, returns 503
+    with `Retry-After: 1`; a failed proxy hop returns 502 `bad_gateway`.
+    On a sharded index (`--shard-count` above 1) `group_by` and
+    `related_to` return 400.
+
+    ## License
+
+    The server does not start without a valid license. If the license
+    expires or stops matching at run time, every write is refused with 403
+    `forbidden` and reads continue. An ingest past the licensed disk cap,
+    and past the tenant's own storage quota, answers 507
+    `insufficient_storage`. A tenant over the licensed tenant count is
+    refused with 403.
+
+    ## gRPC
+
+    An optional gRPC listener (`--grpc-port`) serves the same data plane
+    as `graphann.v1.GraphANN` (search, ingest, tenant and index CRUD).
+    Under `--strict-auth` every call needs a key or the node admin token.
+
     ## Error Format
+
+    A path the server does not route returns 404, and a known path with
+    the wrong method returns 405, both as plain text from the router.
+    Every other error uses the envelope below.
 
     All error responses follow the same envelope:
 
@@ -31,7 +114,7 @@ info:
       }
     }
     ```
-  version: "1.0.0"
+  version: "4.91.11"
   license:
     name: Proprietary (commercial — all rights reserved)
   contact:
@@ -39,17 +122,29 @@ info:
     url: https://github.com/graphann/graphann
 
 servers:
-  - url: http://localhost:8080
-    description: Local development server
+  - url: http://localhost:38888
+    description: |
+      Local server on the default `serve` port. With `--tls-cert` and
+      `--tls-key` the same port serves HTTPS.
+
+# Any one of these. The empty entry is the default auth mode, which serves a
+# request without credentials unless its tenant holds a key.
+security:
+  - bearerAuth: []
+    tenantId: []
+  - apiKeyAuth: []
+    tenantId: []
+  - nodeAdminToken: []
+  - {}
 
 tags:
   - name: Health
     description: Server health and readiness probes.
   - name: License
     description: |
-      Local license status and audit trail. Unauthenticated, like
-      /health. Only mounted when the server was started with a license
-      manager configured -- otherwise 404, not 501.
+      Local license status and audit trail. Always mounted on `serve`.
+      Served without credentials in the default auth mode; under
+      `--strict-auth` it needs a tenant key or the node admin token.
   - name: Tenants
     description: Tenant lifecycle management.
   - name: Indexes
@@ -71,7 +166,7 @@ tags:
   - name: Org Indexes
     description: Listing indexes scoped to orgs and users.
   - name: Jobs
-    description: Async job tracking (currently used by hot-model-switch).
+    description: Job tracking for hot model switches, and records of compaction, backup and restore runs.
   - name: Embedding Model
     description: Hot-swap embedding model endpoints.
   - name: Cluster
@@ -175,6 +270,8 @@ paths:
                 bound_fingerprint: fp_9c2e1a
                 fingerprint_match: true
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/license/audit:
     get:
       operationId: getLicenseAudit
@@ -225,6 +322,8 @@ paths:
   # ==========================================================================
   # Tenants
   # ==========================================================================
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/tenants:
     get:
       operationId: listTenants
@@ -241,6 +340,8 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
       operationId: createTenant
       summary: Create a tenant
@@ -248,6 +349,10 @@ paths:
         Creates a new tenant. When `id` is provided the operation is
         idempotent -- if a tenant with that ID already exists it is returned
         as-is. When `id` is omitted a random UUID is generated.
+
+        Needs the node admin token once `--strict-auth` is on or any tenant holds a key. A
+        caller without the node admin token that names an existing `id` gets 409; with the token
+        the existing tenant is returned. A license that caps tenants refuses creation with 403.
       tags: [Tenants]
       requestBody:
         required: true
@@ -269,6 +374,14 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/tenants/{tenantID}/quota:
     get:
       operationId: getTenantQuota
@@ -290,6 +403,10 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     put:
       operationId: updateTenantQuota
       summary: Set a tenant's storage quota
@@ -325,6 +442,8 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
   /v1/tenants/{tenantID}:
     get:
       operationId: getTenant
@@ -349,6 +468,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '403':
+          $ref: '#/components/responses/Forbidden'
     delete:
       operationId: deleteTenant
       summary: Delete a tenant
@@ -360,6 +481,10 @@ paths:
       tags: [Tenants]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
       responses:
@@ -385,6 +510,8 @@ paths:
   # ==========================================================================
   # Indexes
   # ==========================================================================
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes:
     get:
       operationId: listIndexes
@@ -409,6 +536,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       operationId: createIndex
       summary: Create an index
@@ -457,6 +586,12 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/tenants/{tenantID}/indexes/{indexID}:
     get:
       operationId: getIndex
@@ -522,6 +657,9 @@ paths:
 
         **`approximate`** changes propagate to a loaded LiveIndex immediately;
         no server restart required.
+
+        Invalid embedding fields and an invalid `compression` return 400. An
+        index that disappears during the update returns 404.
       tags: [Indexes]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -548,6 +686,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/status:
     get:
       operationId: getIndexStatus
@@ -578,6 +720,8 @@ paths:
   # ==========================================================================
   # Documents
   # ==========================================================================
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/documents:
     get:
       operationId: listDocumentsByPrefix
@@ -606,10 +750,14 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Page size. Defaults to 100, capped at 1000.
+          description: |
+            Page size. Defaults to 100 and is capped at 1000. A value that
+            is not a positive integer is ignored and the default applies.
           schema:
             type: integer
             default: 100
+            minimum: 1
+            maximum: 1000
       responses:
         "200":
           description: Matching documents.
@@ -621,7 +769,7 @@ paths:
                 documents:
                   - id: doc-001
                     text: "First document."
-                    metadata: { source: readme }
+                    metadata: {source: readme}
                 next_cursor: ""
         "404":
           $ref: "#/components/responses/NotFound"
@@ -630,6 +778,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       operationId: addDocuments
       summary: Add documents
@@ -647,6 +799,12 @@ paths:
         document produces.
 
         Requires an embedding server to be configured.
+
+        Validation (400): a metadata key that starts with the reserved `_graphann_` prefix; a
+        `vector` whose length is not the index dimension; a batch where some documents carry
+        `vector` and others do not. `defer_save` and `bulk` accept `true`, `false`, `1` or `0`.
+        With `--auto-bulk` (on by default) the delta graph of a bulk ingest builds on the first
+        search or flush, so that search can be slower.
       tags: [Documents]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -672,7 +830,7 @@ paths:
             example:
               documents:
                 - text: "GraphANN is a storage-efficient vector database."
-                  metadata: { source: readme }
+                  metadata: {source: readme}
                 - content: "GraphANN achieves up to 95%+ storage savings at scale."
                   repo_id: repo-123
       responses:
@@ -685,7 +843,9 @@ paths:
               example:
                 added: 2
                 index_id: idx_abc123
-                chunk_ids: [0, 1]
+                chunk_ids:
+                  - c_7f3a
+                  - c_91b2
         "400":
           $ref: "#/components/responses/ValidationError"
         "404":
@@ -697,12 +857,21 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '507':
+          $ref: '#/components/responses/InsufficientStorage'
     delete:
       operationId: bulkDeleteDocuments
       summary: Bulk delete documents by internal IDs
       description: |
         Deletes multiple documents by their internal integer document IDs.
         All chunks belonging to the specified documents are permanently deleted.
+
+        `documents_deleted` counts the documents that lost at least one chunk, so an
+        unknown ID counts zero; `deleted_per_doc` carries the chunks removed per document.
       tags: [Documents]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -739,6 +908,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/documents/by-external-id:
     delete:
       operationId: bulkDeleteByExternalIDs
@@ -747,6 +920,9 @@ paths:
         Deletes multiple documents by their client-provided external IDs
         (the `id` field set when adding documents). All chunks belonging
         to the matched documents are permanently deleted.
+
+        `documents_deleted` counts the documents that lost at least one chunk, so an
+        unknown ID counts zero; `deleted_per_id` carries the chunks removed per ID.
       tags: [Documents]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -782,6 +958,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/resources/{resourceID}:
     put:
       operationId: upsertResource
@@ -801,7 +981,11 @@ paths:
         results via the tombstone bitmap.
       tags: [Documents]
       security:
-        - BearerAuth: []
+        - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - name: tenantID
           in: path
@@ -843,6 +1027,10 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '507':
+          $ref: '#/components/responses/InsufficientStorage'
   /v1/tenants/{tenantID}/indexes/{indexID}/documents/{docID}:
     get:
       operationId: getDocument
@@ -867,11 +1055,20 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     delete:
       operationId: deleteDocument
       summary: Delete a document
       description: |
         Permanently deletes a document and all its chunks.
+
+        A document ID with no chunks returns 200 with `deleted_chunks: 0`; 404 means the tenant or
+        index does not exist.
       tags: [Documents]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -900,11 +1097,13 @@ paths:
   # ==========================================================================
   # Chunks
   # ==========================================================================
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/chunks/{chunkID}:
     get:
       operationId: getChunk
       summary: Get a chunk
-      description: Retrieves a specific chunk by its UUID, including text and metadata.
+      description: Retrieves a specific chunk by its integer chunk ID, including text and metadata.
       tags: [Chunks]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -931,12 +1130,18 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '403':
+          $ref: '#/components/responses/Forbidden'
     delete:
       operationId: deleteChunk
       summary: Delete a chunk
       description: |
         Permanently deletes chunks. Requires a JSON body with `chunk_ids`
         even though a single chunk ID is in the path (for batch compatibility).
+
+        The chunks to delete come from the body's `chunk_ids`; the `{chunkID}` path segment is not
+        read. `deleted` counts the chunks that were tombstoned; an ID that names no live chunk
+        in the delta (an unknown ID, or a chunk already compacted into the base) is skipped.
       tags: [Chunks]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -972,6 +1177,10 @@ paths:
   # ==========================================================================
   # Search
   # ==========================================================================
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/search:
     post:
       operationId: search
@@ -982,11 +1191,14 @@ paths:
         set. A text query is embedded server-side and searched
         semantically (dense HNSW); a vector search compares the given
         vector directly against the index. Default `k` is 10 when
-        omitted or zero.
+        omitted, zero or negative; above 10000 returns 400. Identical repeated
+        queries are served for 60 s from a result cache that any write to the
+        index invalidates (`--query-cache-size`, 1024 entries by default, 0
+        disables).
 
         Supplying both a query and a vector is not what makes a search
-        "hybrid" -- it is not a supported combination at all; only one
-        of the two may be set. Hybrid retrieval is the separate `hybrid`
+        "hybrid". Setting both returns 400, and so does `vector` with
+        `vector_b64`. Hybrid retrieval is the separate `hybrid`
         boolean below, which applies only to text queries.
 
         Set `hybrid: true` to fuse the dense (semantic) results with a
@@ -1021,12 +1233,20 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "429":
-          $ref: "#/components/responses/QuotaExceeded"
+          $ref: '#/components/responses/RateLimited'
         "503":
-          $ref: "#/components/responses/IndexNotReady"
+          $ref: '#/components/responses/SearchUnavailable'
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/search/batch:
     post:
       operationId: batchSearch
@@ -1035,8 +1255,9 @@ paths:
         Runs multiple independent queries against one index in a single
         HTTP request. Each entry in `queries` is a full `SearchRequest`,
         so a batch can mix text and vector queries, per-query `k`,
-        filters, rerank and `hybrid` settings -- anything valid on
-        `/search` is valid here. Exists because search throughput is
+        filters, rerank, `hybrid`, `group_by` and `related_to` settings,
+        validated and grouped as on `/search`. A sharded index returns 400:
+        send each query to `/search`, which runs the scatter-gather. Exists because search throughput is
         bound by per-request socket overhead, not by the search itself;
         amortising many queries across one request removes most of that
         overhead. Intended for offline and pipeline callers (evaluation
@@ -1075,20 +1296,28 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "503":
-          $ref: "#/components/responses/IndexNotReady"
+          $ref: '#/components/responses/SearchUnavailable'
         "401":
           $ref: "#/components/responses/Unauthorized"
 
   # ==========================================================================
   # Index Maintenance
   # ==========================================================================
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/compact:
     post:
       operationId: compactIndex
       summary: Trigger an immediate compaction of the index
       description: |
-        Synchronously compacts the index, merging the live delta layer into
-        a new base. The compaction respects the index's stored `compression`
+        Starts a compaction in the background and returns at once with
+        `status: compacting`. The compaction merges the live delta layer into
+        a new base; `compaction completed` appears in the server log and
+        `last_compacted_at` changes on the index when it ends. The compaction respects the index's stored `compression`
         field — recompute-mode indexes stay recompute-mode after compact;
         PQ indexes stay PQ. To change compression mode for an existing
         index, use the offline `graphann recompact` CLI tool.
@@ -1096,10 +1325,14 @@ paths:
         Two-delta safety: writes during compaction land in a fresh delta
         and are preserved through the swap. No acked write is lost.
 
-        Auto-compaction triggers (size threshold / delta-to-base ratio /
-        pending delta-chunk count / max delta age / daily schedule) on the
-        server can fire compaction without operator intervention; this
-        endpoint is for explicit/manual invocation.
+        Auto-compaction triggers fire compaction without operator
+        intervention: a delta of 100 MiB, a delta of 1/16 of a base of at
+        least 1 MiB, 10,000 delta chunks, a delta older than 24 h (2 indexes
+        per cycle), and the daily UTC times of `--compact-schedule`. The
+        scheduler checks every 60 s. This endpoint is for explicit
+        invocation: it hands the index to the compaction scheduler, or
+        runs the compaction directly when no scheduler is wired, and it
+        returns 409 while a compaction of the index is in flight.
 
         The count trigger measures *pending delta chunks* — live plus
         tombstoned (`DeltaChunks + DeletedChunks`) — not tombstones alone.
@@ -1118,15 +1351,15 @@ paths:
         - $ref: "#/components/parameters/indexID"
       responses:
         "200":
-          description: Compaction completed.
+          description: Compaction started.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CompactResponse"
               example:
                 index_id: idx_abc123
-                status: compacted
-                message: Index compaction completed
+                status: compacting
+                message: Index compaction started
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -1142,13 +1375,17 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
               example:
                 error:
-                  code: COMPACT_ALREADY_IN_PROGRESS
+                  code: conflict
                   message: compaction already in progress for this index
         "500":
           $ref: "#/components/responses/InternalError"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/compact-all:
     post:
       operationId: compactAllIndexes
@@ -1163,6 +1400,10 @@ paths:
       tags: [Index Maintenance]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
       responses:
@@ -1201,6 +1442,8 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/tenants/{tenantID}/indexes/{indexID}/clear:
     post:
       operationId: clearIndex
@@ -1230,14 +1473,19 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/live-stats:
     get:
       operationId: getLiveIndexStats
       summary: Get live index statistics
       description: |
-        Returns detailed statistics for a live (in-memory) index including
-        base/delta chunk counts, deleted chunks, and dirty state. If the index
-        is not loaded as a live index, returns basic metadata from disk.
+        Returns detailed statistics for a live (in-memory) index including base/delta chunk
+        counts, deleted chunks, and dirty state. If the index is not loaded, or its live
+        statistics cannot be read, returns basic metadata from disk. `num_chunks` and
+        `num_docs` are present in both cases.
       tags: [Index Maintenance]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -1254,6 +1502,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/flush:
     post:
       operationId: flushIndex
@@ -1267,9 +1519,16 @@ paths:
         delta HNSW graph itself is deferred and built once, concurrently,
         here -- bulk-ingested data is not searchable until this endpoint
         runs.
+
+        An index that is not loaded in memory was saved when it was unloaded, so a flush
+        of it answers 200 with `flushed: true` and writes nothing.
       tags: [Index Maintenance]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - $ref: "#/components/parameters/indexID"
@@ -1291,6 +1550,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/tenants/{tenantID}/indexes/{indexID}/rebuild-graph:
     post:
       operationId: rebuildIndexGraph
@@ -1306,6 +1567,10 @@ paths:
       tags: [Index Maintenance]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - $ref: "#/components/parameters/indexID"
@@ -1342,6 +1607,8 @@ paths:
   # ==========================================================================
   # Batch Import
   # ==========================================================================
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/tenants/{tenantID}/indexes/{indexID}/import:
     post:
       operationId: importDocuments
@@ -1351,6 +1618,12 @@ paths:
         processing (embedding, indexing, compaction). Returns
         immediately with status `processing`. Use the `/pending` endpoint
         to check progress.
+
+        Import keeps each document's text, ID, object `metadata`, expiry and upsert flag. A
+        document with `vector`, `vector_b64`, `repo_id`, `file_path` or `commit_sha` returns
+        400: send it to `POST .../documents`, which keeps them. A metadata key with the
+        reserved `_graphann_` prefix returns 400, and the documents-per-index quota answers
+        429 `quota_exceeded`, as on `POST .../documents`.
       tags: [Batch Import]
       parameters:
         - $ref: "#/components/parameters/tenantID"
@@ -1390,6 +1663,16 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/SearchUnavailable'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '507':
+          $ref: '#/components/responses/InsufficientStorage'
   /v1/tenants/{tenantID}/indexes/{indexID}/pending:
     get:
       operationId: getPendingStatus
@@ -1416,6 +1699,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     delete:
       operationId: clearPending
       summary: Clear pending queue
@@ -1442,6 +1729,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/tenants/{tenantID}/indexes/{indexID}/process:
     post:
       operationId: processPending
@@ -1475,6 +1766,14 @@ paths:
   # ==========================================================================
   # Org -- Documents
   # ==========================================================================
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/SearchUnavailable'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/orgs/{orgID}/documents:
     post:
       operationId: syncDocuments
@@ -1531,6 +1830,12 @@ paths:
   # ==========================================================================
   # Org -- Search
   # ==========================================================================
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '507':
+          $ref: '#/components/responses/InsufficientStorage'
   /v1/orgs/{orgID}/users/{userID}/search:
     post:
       operationId: searchMultiIndex
@@ -1578,6 +1883,16 @@ paths:
   # ==========================================================================
   # Org -- Index Listing
   # ==========================================================================
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/SearchUnavailable'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/orgs/{orgID}/users/{userID}/indexes:
     get:
       operationId: listUserIndexes
@@ -1603,6 +1918,8 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/orgs/{orgID}/shared/indexes:
     get:
       operationId: listSharedIndexes
@@ -1630,6 +1947,8 @@ paths:
   # ==========================================================================
   # Embedding Model — hot-swap (async)
   # ==========================================================================
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/tenants/{tenantID}/indexes/{indexID}/embedding-model:
     patch:
       operationId: switchEmbeddingModel
@@ -1651,6 +1970,10 @@ paths:
       tags: [Embedding Model]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - $ref: "#/components/parameters/indexID"
@@ -1706,17 +2029,26 @@ paths:
   # ==========================================================================
   # Jobs — async job tracking
   # ==========================================================================
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /v1/jobs:
     get:
       operationId: listAllJobs
       summary: List jobs across every tenant (admin only)
       description: |
-        Lists jobs across all tenants. Requires `Admin` role when auth
-        is active. Permissive (no-auth) mode allows access. Supports
-        `status`, `cursor`, and `limit` query parameters.
+        Lists jobs. A caller authenticated with a tenant key sees that tenant's jobs; a caller
+        with the node admin token sees every tenant's jobs. A caller without credentials, in the
+        default auth mode, sees the jobs of tenants that hold no key. Supports `status`, `cursor`
+        and `limit` query parameters.
       tags: [Jobs]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - in: query
           name: status
@@ -1728,15 +2060,21 @@ paths:
           name: cursor
           schema:
             type: string
+            maxLength: 128
+            pattern: "^[A-Za-z0-9_\\-.]{1,128}$"
           description: |
-            Opaque cursor returned in `next_cursor` of a previous page.
+            Opaque cursor returned in `next_cursor` of a previous page. A
+            cursor outside the job-ID character set or longer than 128
+            characters returns 400.
         - in: query
           name: limit
           schema:
             type: integer
             default: 50
-            maximum: 200
-          description: Max jobs per page (default 50, hard cap 200).
+            minimum: 1
+          description: |
+            Jobs per page. A value that is not a positive integer returns
+            400. A value above 200 falls back to the default of 50.
       responses:
         "200":
           description: Job list.
@@ -1746,11 +2084,11 @@ paths:
                 $ref: "#/components/schemas/JobListResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/jobs/{jobID}:
     get:
       operationId: getJob
@@ -1760,11 +2098,15 @@ paths:
         status, progress, timestamps, error). API keys passed when the
         job was created are NEVER echoed back.
 
-        Authorization: when auth is active the request must be from
-        the same tenant that owns the job; otherwise 403 is returned.
+        Authorization: a job of another tenant answers 404, as if it did not exist. Repeated
+        wrong keys answer 429 with `Retry-After: 60`.
       tags: [Jobs]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - in: path
           name: jobID
@@ -1791,6 +2133,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /v1/tenants/{tenantID}/jobs:
     get:
       operationId: listTenantJobs
@@ -1801,6 +2145,10 @@ paths:
       tags: [Jobs]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - in: query
@@ -1812,12 +2160,21 @@ paths:
           name: cursor
           schema:
             type: string
+            maxLength: 128
+            pattern: "^[A-Za-z0-9_\\-.]{1,128}$"
+          description: |
+            Opaque cursor returned in `next_cursor` of a previous page. A
+            cursor outside the job-ID character set or longer than 128
+            characters returns 400.
         - in: query
           name: limit
           schema:
             type: integer
             default: 50
-            maximum: 200
+            minimum: 1
+          description: |
+            Jobs per page. A value that is not a positive integer returns
+            400. A value above 200 falls back to the default of 50.
       responses:
         "200":
           description: Job list scoped to tenant.
@@ -1863,8 +2220,7 @@ paths:
                 $ref: "#/components/schemas/GCResponse"
               example:
                 index_id: idx_abc123
-                expired: 17
-                status: ok
+                deleted_count: 17
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -1872,6 +2228,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/admin/gc:
     post:
       operationId: runGlobalGC
@@ -1884,6 +2244,10 @@ paths:
       tags: [Admin]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       responses:
         "200":
           description: Aggregate TTL sweep result.
@@ -1892,12 +2256,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminGCResponse"
               example:
-                indexes_swept: 12
-                expired: 134
-                status: ok
-        "500":
-          $ref: "#/components/responses/InternalError"
-
+                deleted_count: 134
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/admin/cleanup-orphans:
     post:
       operationId: cleanupOrphans
@@ -1911,6 +2276,10 @@ paths:
       tags: [Admin]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - name: min_age
           in: query
@@ -1947,6 +2316,12 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/admin/embed-space:
     get:
       operationId: getEmbedSpaceAdmin
@@ -1960,6 +2335,10 @@ paths:
       tags: [Admin]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       responses:
         "200":
           description: Fleet embedding-space snapshot.
@@ -1992,6 +2371,8 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/admin/api-key-status:
     get:
       operationId: getAPIKeyStatus
@@ -2012,6 +2393,10 @@ paths:
       tags: [Admin]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       responses:
         "200":
           description: Per-tenant key status plus the node's security posture.
@@ -2034,6 +2419,8 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/admin/backups:
     get:
       operationId: listAllBackups
@@ -2059,6 +2446,10 @@ paths:
       tags: [Admin]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - name: tenant_id
           in: query
@@ -2105,6 +2496,10 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /v1/admin/backups/status:
     get:
       operationId: getBackupStatus
@@ -2116,6 +2511,10 @@ paths:
       tags: [Admin]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       responses:
         "200":
           description: Backup schedule status
@@ -2129,6 +2528,8 @@ paths:
   # ==========================================================================
   # Cluster — read-only introspection
   # ==========================================================================
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/cluster/nodes:
     get:
       operationId: listClusterNodes
@@ -2144,6 +2545,10 @@ paths:
       tags: [Cluster]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       responses:
         "200":
           description: Cluster member list.
@@ -2164,6 +2569,8 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/cluster/shards:
     get:
       operationId: listClusterShards
@@ -2175,6 +2582,10 @@ paths:
       tags: [Cluster]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       responses:
         "200":
           description: Shard placement.
@@ -2197,14 +2608,16 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/cluster/health:
     get:
       operationId: clusterHealth
       summary: Cluster health probe
       description: |
-        Cheap aggregate cluster health check. Intentionally
-        unauthenticated — matches `/metrics` policy so liveness probes
-        and reverse proxies can wire it up without secret rotation.
+        Cheap aggregate cluster health check. Served without credentials
+        in the default auth mode; under `--strict-auth` it needs a tenant
+        key or the node admin token, unlike `/health` and `/ready`.
 
         Returns 200 in `ok` and `degraded` states; 503 in `unhealthy`
         (no nodes alive or no Raft leader). Single-node / non-clustered
@@ -2233,6 +2646,8 @@ paths:
   # ==========================================================================
   # Backups (tenant/index-scoped)
   # ==========================================================================
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/tenants/{tenantID}/indexes/{indexID}/backups:
     post:
       operationId: createBackup
@@ -2247,6 +2662,10 @@ paths:
       tags: [Backups]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - $ref: "#/components/parameters/indexID"
@@ -2298,6 +2717,10 @@ paths:
       tags: [Backups]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
       responses:
@@ -2341,6 +2764,10 @@ paths:
       tags: [Backups]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - $ref: "#/components/parameters/backupID"
@@ -2410,6 +2837,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
   /v1/tenants/{tenantID}/backups/{backupID}:
     delete:
       operationId: deleteBackup
@@ -2421,6 +2850,10 @@ paths:
       tags: [Backups]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - $ref: "#/components/parameters/backupID"
@@ -2461,6 +2894,10 @@ paths:
       tags: [API Keys]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
       requestBody:
@@ -2490,6 +2927,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
     get:
       operationId: listAPIKeys
       summary: List API keys
@@ -2499,6 +2938,10 @@ paths:
       tags: [API Keys]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
       responses:
@@ -2517,6 +2960,8 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/tenants/{tenantID}/api-keys/{keyID}:
     delete:
       operationId: revokeAPIKey
@@ -2527,6 +2972,10 @@ paths:
       tags: [API Keys]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/tenantID"
         - name: keyID
@@ -2551,6 +3000,8 @@ paths:
   # ==========================================================================
   # LLM Settings (org-scoped)
   # ==========================================================================
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/orgs/{orgID}/llm-settings:
     get:
       operationId: getLLMSettings
@@ -2580,6 +3031,8 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+        '403':
+          $ref: '#/components/responses/Forbidden'
     patch:
       operationId: updateLLMSettings
       summary: Update LLM settings (partial merge)
@@ -2591,6 +3044,10 @@ paths:
       tags: [LLM Settings]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/orgID"
       requestBody:
@@ -2620,6 +3077,8 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
     delete:
       operationId: deleteLLMSettings
       summary: Reset LLM settings to defaults
@@ -2631,6 +3090,10 @@ paths:
       tags: [LLM Settings]
       security:
         - bearerAuth: []
+          tenantId: []
+        - apiKeyAuth: []
+          tenantId: []
+        - nodeAdminToken: []
       parameters:
         - $ref: "#/components/parameters/orgID"
       responses:
@@ -2664,21 +3127,44 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: |
-        API-key bearer token. The server treats both the
-        `Authorization: Bearer <token>` header and the `X-API-Key`
-        header equivalently. Tenant scope is inferred from the
-        `X-Tenant-ID` header.
+        A tenant API key as `Authorization: Bearer <key>`. Equivalent to
+        `X-API-Key`. Send it with `X-Tenant-ID`. See Authentication in
+        the overview for when a key is required.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        A tenant API key. Equivalent to `Authorization: Bearer <key>`.
+    tenantId:
+      type: apiKey
+      in: header
+      name: X-Tenant-ID
+      description: |
+        The tenant the key belongs to. Required with a key; under
+        `--strict-auth` a missing or malformed value returns 401 or 400.
+    nodeAdminToken:
+      type: apiKey
+      in: header
+      name: X-GraphANN-Admin-Token
+      description: |
+        The node admin token set with `--admin-token` (at least 24
+        characters). It bypasses the tenant checks, and node-level routes
+        need it once `--strict-auth` is on or any tenant holds a key. A
+        wrong token returns 401 `Invalid admin token`.
 
-        Most endpoints accept anonymous calls (permissive default).
-        When `AuthConfig.ValidateAPIKey` is wired the server enforces
-        roles per endpoint:
-          - `Admin` only: cluster routes, `/v1/jobs`, admin TTL/orphan
-          - `Admin | Editor`: PATCH .../embedding-model
-          - default: every other route
-
-        Operators who want strict deny-by-default semantics must wrap
-        the chain with `OptionalAuthMiddleware` replaced by
-        `AuthMiddleware`.
+  # =========================================================================
+  # Headers
+  # =========================================================================
+  headers:
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema:
+        type: integer
+    RequestID:
+      description: The request ID, echoed from the request's `X-Request-ID` or generated.
+      schema:
+        type: string
 
   # =========================================================================
   # Parameters
@@ -2787,6 +3273,24 @@ components:
               code: not_found
               message: Index not found
 
+    RateLimited:
+      description: |
+        Too many requests: a tenant over its share of the search
+        concurrency gate under `--strict-auth`, or repeated wrong keys
+        from one client address. Error code `rate_limited`.
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    PayloadTooLarge:
+      description: The request body is larger than 16 MiB. Error code `payload_too_large`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     Unauthorized:
       description: |
         Authentication required. Returned when a presented API key is not
@@ -2877,6 +3381,38 @@ components:
   # =========================================================================
   # Schemas
   # =========================================================================
+    Conflict:
+      description: |
+        Conflict with the current state. Error code `conflict`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    InsufficientStorage:
+      description: |
+        The tenant's storage quota, or the licensed disk limit, is used up. Error
+        code `insufficient_storage`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    SearchUnavailable:
+      description: |
+        Search cannot run now. The JSON envelope carries `index_not_ready` (the index is still
+        being built) or `service_unavailable` (no search service, or a shard fencing). When the
+        node's search concurrency gate stays full for 2 s the body is the plain text
+        `server overloaded` with `Retry-After: 2`.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+        text/plain:
+          schema:
+            type: string
+            example: server overloaded
   schemas:
     # -- Error envelope ----------------------------------------------------
     ErrorEnvelope:
@@ -3107,6 +3643,8 @@ components:
             checked here — it depends on which embedding model the index
             uses — so a chunk_size accepted by this validation can still be
             clamped down at chunking time.
+          minimum: 64
+          maximum: 8192
         chunk_overlap:
           type: integer
           description: |
@@ -3122,6 +3660,7 @@ components:
             still be reduced once the model's token budget shrinks the
             effective size.
 
+          minimum: 0
     UpdateIndexRequest:
       type: object
       properties:
@@ -3150,7 +3689,10 @@ components:
             offline or trigger a manual compaction.
         embedding_backend:
           type: string
-          enum: ["", ollama, openai]
+          enum:
+            - ''
+            - ollama
+            - openai
           description: |
             Per-index embedding backend override. Remote backends only --
             per-index local_onnx instances are deliberately unsupported;
@@ -3163,25 +3705,33 @@ components:
             "intfloat/multilingual-e5-small"). e5-family models get the
             query:/passage: intent prefixes applied automatically by the
             openai backend preset.
+          pattern: ^[A-Za-z0-9._:/\-]{1,256}$
         embedding_endpoint:
           type: string
           description: |
             Optional override of the backend base URL. SSRF-validated at
             PATCH time (public http/https hosts only) and re-guarded at
             connect time, so it cannot point at loopback/RFC1918/metadata
-            ranges.
+            ranges, unless the server runs with
+            `--allow-private-embedding-endpoints`.
         embedding_dimension:
           type: integer
           description: Expected output dimension for the per-index embedding override.
+          minimum: 0
+          maximum: 8192
         embedding_api_key_env:
           type: string
           description: |
             ENV VAR NAME holding the backend key -- never send the key
             itself in this field.
 
+          pattern: ^[A-Z_][A-Z0-9_]{0,127}$
     IndexInfo:
       type: object
-      description: Full index metadata as stored by the tenant manager.
+      description: |
+        Index metadata as stored by the tenant manager. In the org index lists an index found
+        on disk but not in the tenant's catalog is listed with `id`, `path` and `status` only;
+        its counts, dimension and timestamps are zero.
       properties:
         id:
           type: string
@@ -3212,10 +3762,9 @@ components:
           type: string
           format: date-time
           description: |
-            Wall-clock time of the most recent successful compaction.
-            Absent when the index has never been compacted (either
-            genuinely fresh, or compacted before this field existed --
-            callers fall back to `created_at` in that case).
+            Wall-clock time of the most recent successful compaction. Absent when the index
+            was never compacted (fresh, or compacted before this field existed); callers fall
+            back to `created_at` in that case.
         created_by:
           type: string
           description: User ID of the index's creator, if known.
@@ -3755,7 +4304,8 @@ components:
         k:
           type: integer
           default: 10
-          description: Maximum number of results to return.
+          description: Maximum number of results to return. 0 or a negative value means 10; above 10000 returns 400.
+          maximum: 10000
         filter:
           $ref: "#/components/schemas/SearchFilter"
         rerank:
@@ -3765,7 +4315,8 @@ components:
             When true, rescore the top-`candidate_k` HNSW candidates with the
             server-configured cross-encoder reranker and return the top-`rerank_k`
             (or top-`k` if `rerank_k` is unset) by reranker score. Silently no-op
-            when the server has no reranker configured (`--reranker-url` unset),
+            when the server has no reranker configured (none of `--reranker-url`, `--reranker-builtin` or
+            `--reranker-onnx-model` set),
             so flipping this on a non-rerank-aware deployment is safe.
 
             Reranking only applies to the text-`query` path. Vector-only
@@ -3776,6 +4327,7 @@ components:
             Size of the first-stage candidate pool fed to the reranker. Effective
             only when `rerank=true`. Defaults to `max(4*k, 50)`. Server clamps to
             `[k, 1000]`.
+          maximum: 1000
         rerank_k:
           type: integer
           description: |
@@ -3787,6 +4339,8 @@ components:
             Per-query HNSW search breadth (candidate list size). 0 (the
             default) uses the server default. Clamped to a maximum of
             2000.
+          minimum: 0
+          maximum: 2000
         hybrid:
           type: boolean
           default: false
@@ -3822,6 +4376,74 @@ components:
             results. Required (>= 1) when `group_by` is set; an error if
             `group_by` is set and this is unset or less than 1. Ignored
             (no effect, no validation) when `group_by` is unset.
+        related_to:
+          type: string
+          description: |
+            The external ID of a stored document. When set, the request is a
+            related search from that document instead of a query: the server
+            sums the vectors it holds for the document's live chunks (stored
+            vectors for recent writes, decoded codes for compacted rows),
+            normalises the sum and searches from it. Results hold one entry
+            per document and never the source itself, whatever its number of
+            chunks. No text is embedded. Must not be combined with `query`,
+            `vector`, `hybrid`, `rerank` or `group_by` (400); `k` is at most
+            100. `filter` and `ef_search` apply as usual, and `filter` applies
+            to every hop of a walk. Unknown or deleted document: 404. Not
+            supported on a sharded index (400). Empty (the default) leaves the
+            search unchanged. The result cache does not apply.
+        hops:
+          type: integer
+          minimum: 1
+          maximum: 3
+          description: |
+            Length of a related walk; needs `related_to`. 1 (the default) is
+            the direct related search. With 2 or 3 the server expands the
+            `fanout` best documents of each hop, ranks each hop by codes only,
+            and scores a path as the product of its hop scores, each clamped
+            to [0, 1]. Results are the documents reached at hop 2 or later,
+            ranked by their best path, with `path`, `support` and
+            `direct_score` set, and the response sets `exhaustive`. A walk of
+            2 hops runs 1 + `fanout` related searches; one of 3 runs
+            1 + 2 * `fanout`.
+        fanout:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: |
+            Documents each hop of a walk expands, and the length of each hop's
+            list. Needs `hops` of 2 or 3.
+        novel_only:
+          type: boolean
+          default: false
+          description: |
+            Drop walk results that the source's own related list of its 50
+            nearest documents already holds, so only documents reached through
+            other documents remain. Needs `hops` of 2 or 3.
+        diversity:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          default: 0
+          description: |
+            Weight of the diverse frontier pick of a walk. Each hop expands
+            the documents with the best path score minus `diversity` times
+            their largest similarity to the documents it already picked, so
+            a near-duplicate or a same-template sibling of a picked document
+            loses to a distinct one. 0 expands the `fanout` best paths. Needs
+            `hops` of 2 or 3.
+
+    RelatedHop:
+      type: object
+      properties:
+        id:
+          type: string
+          description: External ID of the document this hop reached.
+        score:
+          type: number
+          format: float
+          description: Similarity of the hop, as a related search scores it.
 
     SearchResult:
       type: object
@@ -3855,6 +4477,24 @@ components:
             first-stage results. Clients that want the post-rerank
             order should sort by `rerank_score` when present and fall
             back to `score` otherwise.
+        path:
+          type: array
+          items:
+            $ref: "#/components/schemas/RelatedHop"
+          description: |
+            Set by a related walk (`hops` of 2 or 3): the best path from the
+            source to this document, the source left out. `score` is then the
+            product of the path's hop scores.
+        support:
+          type: integer
+          description: Set by a related walk; the number of paths the walk found to this document.
+        direct_score:
+          type: number
+          format: float
+          description: |
+            Set by a related walk; the similarity of this document to the
+            source itself. A path score well above it marks a relation that a
+            direct related search would rank low.
         metadata:
           type: object
           description: Chunk metadata merged with arbitrary user metadata.
@@ -3892,6 +4532,13 @@ components:
     SearchResponse:
       type: object
       properties:
+        exhaustive:
+          type: boolean
+          description: |
+            Set by a related walk: true when no path the walk left unexplored
+            can score above its k-th result, so the top k are the best paths
+            of the whole walk; false when pruning may have hidden a better
+            path.
         results:
           type: array
           items:
@@ -3908,6 +4555,9 @@ components:
         shards_ok:
           type: integer
           description: Shards that returned complete results.
+        shards_probed:
+          type: integer
+          description: Shards the query visited. Lower than shards_total when content routing pruned shards that cannot hold a closer result.
         degraded_shards:
           type: array
           items:
@@ -4041,13 +4691,17 @@ components:
             Rebuild advisory: true when base_deleted_fraction exceeds the
             ~5% threshold. Advisory only -- the server never auto-compacts
             on it. Always false in the not-loaded fallback.
-        # Fields when is_live=false
+        # Present for loaded and not-loaded indexes alike
         num_chunks:
           type: integer
-          description: Stored chunk count (from metadata).
+          description: |
+            Chunk count: the live chunk count of a loaded index, or the stored count from
+            metadata in the fallback.
         num_docs:
           type: integer
-          description: Stored document count (from metadata).
+          description: |
+            Document count: the live document count of a loaded index, or the stored count
+            from metadata in the fallback.
 
     # -- Batch Import ------------------------------------------------------
     ImportDocumentsRequest:
@@ -4142,11 +4796,13 @@ components:
         user_id:
           type: string
           description: ID of the user performing the sync.
+          pattern: ^[a-zA-Z0-9_-]{1,64}$
         source_type:
           type: string
           description: |
             Integration source type (e.g. `github`, `confluence`, `slack`,
             `gmail`, `gdocs`).
+          pattern: ^[a-zA-Z0-9_-]{1,64}$
         shared:
           type: boolean
           default: false
@@ -4187,8 +4843,7 @@ components:
           type: integer
           default: 0
           description: |
-            Maximum results. 0 (default) returns all relevant results with
-            no limit.
+            Maximum results. 0 (default), a negative value or a value above 10000 means 10000.
         max_results:
           type: integer
           deprecated: true
@@ -4203,7 +4858,8 @@ components:
         ef_search:
           type: integer
           default: 500
-          description: Search expansion factor for HNSW traversal.
+          description: Search expansion factor for HNSW traversal. 0 or a negative value means 500; above 2000 is clamped to 2000.
+          maximum: 2000
         include_text:
           type: boolean
           default: false
@@ -4373,7 +5029,14 @@ components:
           type: string
         kind:
           type: string
-          enum: [reembed]
+          enum:
+            - reembed
+            - compaction
+            - backup
+            - restore
+          description: |
+            `reembed` is a hot model switch. `compaction`, `backup` and `restore` are records of
+            work the schedulers and handlers run, listed so they show in the job views.
         tenant_id:
           type: string
         index_id:
@@ -4404,6 +5067,7 @@ components:
             $ref: "#/components/schemas/Job"
         total:
           type: integer
+          description: Number of jobs in this page.
         next_cursor:
           type: string
           description: Cursor to pass back as `?cursor=` for the next page.
@@ -4462,17 +5126,7 @@ components:
     AdminBackupRow:
       type: object
       description: One backup row in GET /v1/admin/backups.
-      required:
-        [
-          id,
-          tenant_id,
-          tenant_name,
-          index_id,
-          index_name,
-          created_at,
-          total_size,
-          num_chunks,
-        ]
+      required: [id, tenant_id, tenant_name, index_id, index_name, created_at, total_size, num_chunks]
       properties:
         id:
           type: string
@@ -4721,7 +5375,10 @@ components:
             On write a masked sentinel preserves the existing key.
         base_url:
           type: string
-          description: Optional base URL override. SSRF-validated server-side.
+          description: |
+            Optional base URL override. SSRF-validated server-side: only
+            public http and https hosts are accepted, whatever the
+            embedding-endpoint switches say.
         temperature:
           type: number
           format: float
@@ -4839,12 +5496,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SearchRequest"
+          minItems: 1
           maxItems: 128
           description: Up to 128 independent queries, each valid on its own against `/search`.
 
     BatchSearchResult:
       type: object
       properties:
+        exhaustive:
+          type: boolean
+          description: As `SearchResponse.exhaustive`, for a related walk in the batch.
         results:
           type: array
           items:
