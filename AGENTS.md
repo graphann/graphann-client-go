@@ -12,7 +12,7 @@ All methods take a `context.Context` first and return `(*T, error)` (or just
 ## Install
 
 Install the GitHub release with
-`go get github.com/graphann/graphann-client-go@v0.11.0`;
+`go get github.com/graphann/graphann-client-go@v0.12.0`;
 see [README installation](README.md#install).
 
 ## Client construction + auth

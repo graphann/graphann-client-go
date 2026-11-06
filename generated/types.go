@@ -2102,6 +2102,21 @@ type SearchFilter struct {
 	// the filter. Empty/absent map disables this filter.
 	MetadataFilter *map[string]interface{} `json:"metadata_filter,omitempty"`
 
+	// OmitMetadata Drops the `metadata` field from every result: the document's
+	// sidecar metadata and the chunk fields. Off by default, so an
+	// existing client sees exactly what it saw before. Ids, scores,
+	// order and count equal those of the same request without it;
+	// `expires_at` expiry, `metadata_filter` and `exclude_external_ids`
+	// still decide which rows are returned. Worth setting for a caller
+	// that reads only `id` and `score`: a base row then reads no
+	// metadata block, unless the block table shows an expiring entry
+	// in reach or the request carries a `metadata_filter`. Refused
+	// with 400 when combined with `group_by` (`chunk_count` is
+	// reported in the metadata) or `recency` (it reads a sidecar
+	// field). On a sharded index the shards build full rows and the
+	// coordinator drops the metadata.
+	OmitMetadata *bool `json:"omit_metadata,omitempty"`
+
 	// OmitText Drops the chunk text from every result. Off by default, so
 	// an existing client sees exactly what it saw before. Worth
 	// setting for a caller that already holds the text -- a RAG

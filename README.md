@@ -4,7 +4,7 @@ Official Go client SDK for the [GraphANN](https://graphann.com) vector
 database.
 
 - Module: `github.com/graphann/graphann-client-go`
-- Version: `v0.11.0`
+- Version: `v0.12.0`
 - License: see [`./LICENSE`](./LICENSE)
 
 The SDK speaks the v1 HTTP API and exposes idiomatic Go types for
@@ -15,7 +15,7 @@ tenant, index, document, search, job, cluster, and settings operations.
 Install the tagged release from GitHub:
 
 ```bash
-go get github.com/graphann/graphann-client-go@v0.11.0
+go get github.com/graphann/graphann-client-go@v0.12.0
 ```
 
 ## 5-line quickstart
@@ -236,7 +236,7 @@ not retried. The `ErrorCode*` constants name the values of `APIError.Code`.
   `io.LimitReader(resp.Body, 50 MiB)` to bound memory usage.
 - **gzip**: request bodies remain plain JSON at every size. The SDK
   requests and decodes gzip-compressed responses.
-- **User-Agent**: `graphann-go/0.11.0 (go1.21+; goos/goarch)` by default.
+- **User-Agent**: `graphann-go/0.12.0 (go1.21+; goos/goarch)` by default.
 - **Singleflight**: opt-in with `WithSingleflight(window)`. Concurrent
   identical search requests are coalesced; the result stays sticky for
   `window` after completion.

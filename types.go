@@ -393,6 +393,10 @@ type SearchFilter struct {
 	// when the caller already holds the text (RAG pipelines reading
 	// from their own store, reranking stages keyed on ids).
 	OmitText bool `json:"omit_text,omitempty"`
+
+	// OmitMetadata drops the metadata field from every result. Off by default.
+	// The server refuses it with 400 together with group_by or recency.
+	OmitMetadata bool `json:"omit_metadata,omitempty"`
 }
 
 // SearchRequest is the body for POST .../search and friends.

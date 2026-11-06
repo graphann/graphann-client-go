@@ -7,7 +7,7 @@ server repository. It is the single input every client SDK generates from.
 |---|---|
 | Source repo | `graphann` |
 | Source path | `api/openapi/spec.yaml` |
-| Vendored from commit | `c1834e3b` |
+| Vendored from commit | `c1834e3b` plus `SearchFilter.omit_metadata` from server `7b8d47d2` |
 | Vendored on | 2026-11-03 |
 | sha256 | `ed83bd79751675d8c78822a71ecd55b9…` (first 32 chars) |
 | Lines | 5815 |
